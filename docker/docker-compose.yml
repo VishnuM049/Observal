@@ -1,0 +1,51 @@
+services:
+  observal-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    depends_on:
+      observal-db:
+        condition: service_healthy
+      observal-clickhouse:
+        condition: service_started
+    networks:
+      - observal-net
+
+  observal-db:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: observal
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - observal-net
+
+  observal-clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+    volumes:
+      - chdata:/var/lib/clickhouse
+    networks:
+      - observal-net
+
+volumes:
+  pgdata:
+  chdata:
+
+networks:
+  observal-net:
+    driver: bridge

@@ -23,6 +23,14 @@ Phase 8: Web UI              ░░░░░░░░░░  (~3-4 weeks)
 **Critical path:** Phase 1 → 2 → 3 → 4 → 5 → 7
 **Parallel track (once Phase 2 lands):** Phase 6 and Phase 8 can start
 
+### Key v1 Decisions (deviations from spec, this plan takes priority)
+
+1. **Validation pipeline (v1):** 3 stages only — Clone & Inspect → Manifest Validation → Approval Gate. Security scan, standards check, test execution, and SLM quality check are deferred to post-v1.
+2. **Auth (v1):** API key + session token. No SSO/SAML — deferred to post-v1.
+3. **Agent submission model:** Agents are configuration objects assembled interactively via `observal agent create`, NOT git repos. Only MCP servers use `observal submit <GIT_URL>`.
+4. **CLI naming:** `observal install` (not `observal config`) for generating IDE config snippets.
+5. **Web UI submission:** v1 is CLI-first. Web-based submission form is part of Phase 8, not earlier.
+
 ---
 
 ## Phase 1: Foundation
@@ -97,6 +105,16 @@ Phase 8: Web UI              ░░░░░░░░░░  (~3-4 weeks)
 - `observal install <mcp-id> --ide <cursor|claude-code|kiro|gemini-cli>` generates config snippet
 - Download tracking (incremented when config is generated)
 
+### v1 Validation Pipeline (3 stages)
+
+```
+Stage 1: Clone & Inspect     → Clone repo, detect FastMCP entry point
+Stage 2: Manifest Validation  → Validate tools, descriptions, schemas, importability
+Stage 3: Approval Gate        → Auto-approve (if configured) or queue for admin review
+```
+
+Stages deferred to post-v1: Security Scan, Standards Check, Test Execution, SLM Quality Check.
+
 ### MCP Declaration Standard (FastMCP on Python)
 
 This is the "detailed process for how MCPs should be declared" — what Observal expects to find when it clones the repo:
@@ -119,7 +137,7 @@ What Observal extracts from the FastMCP server:
 4. Prompt templates (if any)
 
 Validation rules:
-- Server must have a name and non-empty description
+- Server must have a name and non-empty description (min 100 chars)
 - Every tool must have a description (min 20 chars)
 - Every tool must have typed input parameters (no **kwargs without schema)
 - Server must be importable without runtime errors (Observal does a dry import in sandbox)
@@ -823,13 +841,17 @@ Key parallelization:
 
 ## Post-v1 Roadmap (What Comes Next)
 
-1. **TypeScript MCP SDK support** (expand beyond FastMCP/Python)
-2. **SSO/SAML full integration** (replace basic auth)
-3. **Security scan stage** in validation pipeline (secret detection, dep audit)
-4. **SLM quality check stage** in validation pipeline (description quality scoring)
-5. **Test execution stage** in validation pipeline (sandboxed test runner)
-6. **Git webhook integration** (auto-detect new versions on push)
-7. **Inline IDE feedback** (thumbs up/down captured via hooks)
-8. **SLM fine-tuning pipeline** (automated training on enterprise data)
-9. **Multi-tenancy / team namespaces** in the registry
-10. **OTLP export** (ship Observal telemetry to external observability tools)
+**Validation pipeline expansion (v1.x):**
+1. **Security scan stage** (secret detection, dep audit)
+2. **Standards check stage** (enterprise custom field enforcement, naming conventions)
+3. **Test execution stage** (sandboxed test runner)
+4. **SLM quality check stage** (description quality scoring)
+
+**Platform expansion (v2):**
+5. **SSO/SAML full integration** (replace API key auth)
+6. **TypeScript MCP SDK support** (expand beyond FastMCP/Python)
+7. **Git webhook integration** (auto-detect new versions on push)
+8. **Inline IDE feedback** (thumbs up/down captured via hooks)
+9. **SLM fine-tuning pipeline** (automated training on enterprise data)
+10. **Multi-tenancy / team namespaces** in the registry
+11. **OTLP export** (ship Observal telemetry to external observability tools)
