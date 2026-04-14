@@ -250,6 +250,18 @@ The `ee/` directory contains proprietary enterprise features licensed under the 
 
 ## Implementation notes
 
+### Library Documentation Lookup (MANDATORY)
+
+**ALWAYS lookup library documentation before implementing library-specific code.** Use `/docs <library-name>` or the `docs-lookup` skill (via Context7 MCP) to fetch current API documentation. This is REQUIRED for:
+- Adding new dependencies or imports
+- Framework-specific patterns (FastAPI, Strawberry, Typer, SQLAlchemy, Alembic, pytest, Next.js, React, TanStack Query, etc.)
+- Library APIs you're not 100% certain about
+- Version-specific features
+
+NEVER guess or hallucinate library APIs. Lookup docs first to ensure code matches the installed version and prevent breaking changes. Examples: `/docs fastapi`, `/docs sqlalchemy`, `/docs nextjs`, `/docs strawberry-graphql`, `/docs pytest`.
+
+### Database Architecture
+
 - Two databases: PostgreSQL for relational data (users, MCPs, agents, feedback, eval runs), ClickHouse for time-series telemetry (traces, spans, scores). They are not interchangeable.
 - ClickHouse uses ReplacingMergeTree with bloom filter indexes. Queries go through the HTTP interface, not a native driver. The `_query` helper in `clickhouse.py` handles parameterized queries.
 - The shim is the core telemetry collection mechanism. It sits between the IDE and the MCP server, completely transparent. It never modifies messages: only observes. Telemetry is fire-and-forget via async POST; if the server is down, spans are silently dropped.
@@ -269,3 +281,19 @@ The `ee/` directory contains proprietary enterprise features licensed under the 
 - The data model is agent-centric. Agents bundle components (MCPs, skills, hooks, prompts, sandboxes) via `agent_components`, a polymorphic junction table with NO foreign key on `component_id` (allows cross-type references). Agent downloads are deduplicated by `(user_id)` and `(fingerprint)` unique constraints; component downloads are not deduplicated. All components support organization ownership via `is_private` + `owner_org_id` fields. Git-based versioning: components require `git_url` + `git_ref` for reproducible installs.
 - The web frontend uses OKLCH color space for perceptually uniform theming. 5 themes are defined in `globals.css` using CSS custom properties. Theme switching is handled by `theme-switcher.tsx`. The design system uses a 4pt spacing scale, semantic color tokens (background, foreground, card, border, primary, secondary, accent, destructive, success, warning, info), and motion tokens for animations.
 - The web frontend proxies all API calls through Next.js rewrites (`/api/v1/*` -> backend). The backend URL is configured via `NEXT_PUBLIC_API_URL` env var (defaults to `http://localhost:8000`). Auth state (API key, user role) is stored in localStorage. Role-based access is enforced client-side via AuthGuard and AdminGuard components, not Next.js middleware.
+
+
+# lean-ctx — Context Engineering Layer
+
+PREFER lean-ctx MCP tools over native equivalents for token savings:
+
+| PREFER | OVER | Why |
+|--------|------|-----|
+| `ctx_read(path)` | Read / cat / head / tail | Cached, 8 compression modes, re-reads ~13 tokens |
+| `ctx_shell(command)` | Shell / bash / terminal | Pattern compression for git/npm/cargo output |
+| `ctx_search(pattern, path)` | Grep / rg / search | Compact, token-efficient results |
+| `ctx_tree(path, depth)` | ls / find / tree | Compact directory maps |
+| `ctx_edit(path, old_string, new_string)` | Edit (when Read unavailable) | Search-and-replace without native Read |
+
+Edit files: use native Edit/StrReplace if available. If Edit requires Read and Read is unavailable, use ctx_edit.
+Write, Delete, Glob — use normally. NEVER loop on Edit failures — switch to ctx_edit immediately.
