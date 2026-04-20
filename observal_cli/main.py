@@ -11,6 +11,10 @@ from observal_cli.cmd_auth import version_callback
 
 def _version_option(value: bool):
     if value:
+        from observal_cli.render import console
+        from observal_cli.splash import print_splash
+
+        print_splash(console)
         version_callback()
         raise typer.Exit()
 
