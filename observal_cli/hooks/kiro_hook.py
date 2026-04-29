@@ -168,7 +168,7 @@ def _get_parent_pid(pid: int) -> int | None:
     elif sys.platform == "win32":
         import ctypes
 
-        TH32CS_SNAPPROCESS = 0x00000002
+        TH32CS_SNAPPROCESS = 0x00000002  # noqa: N806
 
         class PROCESSENTRY32(ctypes.Structure):
             _fields_ = [
@@ -227,7 +227,7 @@ def _is_kiro_cli_process(pid: int) -> bool:
     elif sys.platform == "win32":
         import ctypes
 
-        TH32CS_SNAPPROCESS = 0x00000002
+        TH32CS_SNAPPROCESS = 0x00000002  # noqa: N806
 
         class PROCESSENTRY32(ctypes.Structure):
             _fields_ = [
