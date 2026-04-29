@@ -159,9 +159,7 @@ def _get_parent_pid(pid: int) -> int | None:
         import subprocess
 
         try:
-            out = subprocess.check_output(
-                ["ps", "-p", str(pid), "-o", "ppid="], text=True, timeout=2
-            ).strip()
+            out = subprocess.check_output(["ps", "-p", str(pid), "-o", "ppid="], text=True, timeout=2).strip()
             return int(out)
         except Exception:
             return None
@@ -218,9 +216,7 @@ def _is_kiro_cli_process(pid: int) -> bool:
         import subprocess
 
         try:
-            out = subprocess.check_output(
-                ["ps", "-p", str(pid), "-o", "comm="], text=True, timeout=2
-            ).strip()
+            out = subprocess.check_output(["ps", "-p", str(pid), "-o", "comm="], text=True, timeout=2).strip()
             return "kiro-cli" in out
         except Exception:
             return False
