@@ -15,38 +15,25 @@ from observal_cli import client, config
 from observal_cli.ide_registry import get_scope_aware_ides
 from observal_cli.render import spinner
 
-# Hook script names used as placeholders in server-generated agent configs.
-# Resolved to absolute paths client-side before writing to disk.
+# Legacy: Hook script names that may appear in server-generated configs.
+# These are now rewritten to Python module commands by _resolve_hook_paths.
 _HOOK_SCRIPT_NAMES = ("observal-hook.sh", "observal-stop-hook.sh")
 
 
 def _resolve_hook_paths(content: str) -> str:
-    """Replace hook script names with absolute paths in agent file content.
+    """Replace hook script names with session_push Python module commands.
 
-    Server-side config generator emits bare script names (observal-hook.sh)
-    since it doesn't know the client's install path. This resolves them to
-    the actual paths inside the installed package.
-
-    Uses regex anchored to quoted command context so matches like
-    ``"observal-hook.sh --agent-name foo"`` are resolved correctly,
-    but comments or prose mentioning the script name are not affected.
+    Server-side config generator may emit old script names (observal-hook.sh)
+    since it can take time to update all generators. Rewrite these to the
+    new Python module commands to ensure hooks work correctly.
     """
-    import shutil
+    hook_cmd = f"{sys.executable} -m observal_cli.hooks.session_push"
 
-    hooks_dir = Path(__file__).parent / "hooks"
-    for name in _HOOK_SCRIPT_NAMES:
-        local = hooks_dir / name
-        path = local.resolve().as_posix()
-        if not local.is_file():
-            # Fallback: check if it's on PATH
-            found = shutil.which(name)
-            if not found:
-                continue
-            path = Path(found).resolve().as_posix()
-        # Match script name inside quotes with optional trailing args, replace only the script name
-        pattern = rf'"{re.escape(name)}(?:\s+[^"]*)?'
-        replacement = f'"{path}'
-        content = re.sub(pattern, replacement, content)
+    # Match "observal-hook.sh" or "observal-stop-hook.sh" inside quotes (with optional args)
+    pattern = r'"observal-(?:stop-)?hook\.sh(?:\s+[^"]*)?'
+    replacement = f'"{hook_cmd}'
+    content = re.sub(pattern, replacement, content)
+
     return content
 
 

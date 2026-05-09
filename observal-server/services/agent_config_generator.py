@@ -608,40 +608,17 @@ def generate_agent_config(
 
     if ide == "kiro":
         # Kiro agent JSON: drop into ~/.kiro/agents/<name>.json
-        # Telemetry collected via observal-shim + hook bridge
+        # Telemetry collected via session JSONL push
         if platform == "win32":
-            # PowerShell-compatible: pipe stdin through the Python hook script.
-            # No cat/sed/curl/$PPID/$TERM/$SHELL — those don't exist in PowerShell.
-            hook_cmd = (
-                f"python -m observal_cli.hooks.kiro_hook "
-                f"--url {observal_url}/api/v1/telemetry/hooks "
-                f"--agent-name {safe_name}"
-            )
-            stop_cmd = (
-                f"python -m observal_cli.hooks.kiro_stop_hook "
-                f"--url {observal_url}/api/v1/telemetry/hooks "
-                f"--agent-name {safe_name}"
-            )
-            spawn_cmd = hook_cmd  # Windows: Python script handles session IDs
+            hook_cmd = "python -m observal_cli.hooks.kiro_session_push"
         else:
-            # Unix: use the same Python hook scripts as Windows.
-            hook_cmd = (
-                f"python3 -m observal_cli.hooks.kiro_hook "
-                f"--url {observal_url}/api/v1/telemetry/hooks "
-                f"--agent-name {safe_name}"
-            )
-            stop_cmd = (
-                f"python3 -m observal_cli.hooks.kiro_stop_hook "
-                f"--url {observal_url}/api/v1/telemetry/hooks "
-                f"--agent-name {safe_name}"
-            )
-            spawn_cmd = hook_cmd  # Python script handles session IDs
+            hook_cmd = "python3 -m observal_cli.hooks.kiro_session_push"
         hooks = {
-            "agentSpawn": [{"command": spawn_cmd}],
+            "agentSpawn": [{"command": hook_cmd}],
             "userPromptSubmit": [{"command": hook_cmd}],
             "preToolUse": [{"matcher": "*", "command": hook_cmd}],
             "postToolUse": [{"matcher": "*", "command": hook_cmd}],
-            "stop": [{"command": stop_cmd}],
+            "stop": [{"command": hook_cmd}],
         }
         # Merge hook components (e.g. tester1) into the Kiro hooks dict
         for hc in hook_configs:
@@ -752,8 +729,8 @@ def generate_agent_config(
                 frontmatter_lines.append(f"  - {mcp_name}")
         frontmatter_lines.extend(
             _claude_code_hooks_frontmatter_lines(
-                "observal-hook.sh",
-                "observal-stop-hook.sh",
+                "python3 -m observal_cli.hooks.session_push",
+                "python3 -m observal_cli.hooks.session_push",
                 agent_name=safe_name,
                 custom_hooks=hook_configs,
             )
@@ -782,31 +759,14 @@ def generate_agent_config(
             result["_warnings"] = warnings_combined
         return result
 
-    if ide in ("gemini-cli", "gemini_cli"):
-        gemini_spec = IDE_REGISTRY["gemini-cli"]
-        gemini_scope = options.get("scope", gemini_spec["default_scope"])
-        rules_path = gemini_spec["rules_file"][gemini_scope]
-        mcp_path = gemini_spec["mcp_config_path"][gemini_scope]
-        hooks_path = gemini_spec["mcp_config_path"][gemini_scope]  # hooks live in same settings.json
-        gemini_settings_content: dict = {"mcpServers": mcp_configs}
-        gemini_model = options.get("_resolved_model")
-        if gemini_model:
-            gemini_settings_content["model"] = gemini_model
-        result = {
-            "rules_file": {"path": rules_path, "content": rules_content},
-            "mcp_config": {"path": mcp_path, "content": gemini_settings_content},
-            "hooks_config": {
-                "path": hooks_path,
-                "content": _gemini_hooks_config("observal-hook.sh", "observal-stop-hook.sh"),
-            },
-            "otlp_env": _gemini_otlp_env(effective_otlp_http),
-            "gemini_settings_snippet": _gemini_settings(effective_otlp_http),
-            "scope": gemini_scope,
-        }
-        warnings_combined = list(compatibility_warnings)
-        warnings_combined.extend(options.get("_model_warnings") or [])
-        if warnings_combined:
-            result["_warnings"] = warnings_combined
+    if ide in ("gemini-cli", "gemini_cli", "cursor", "vscode", "copilot", "copilot-cli", "opencode"):
+        import typer
+        msg = (
+            f"IDE '{ide}' is no longer supported for agent config generation.\n"
+            f"Session JSONL telemetry requires native IDE support. "
+            f"Supported IDEs: kiro, claude-code."
+        )
+        raise typer.Exit(msg)
         return result
 
     if ide == "codex":
@@ -827,164 +787,6 @@ def generate_agent_config(
             result["_warnings"] = warnings_combined
         return result
 
-    if ide == "copilot":
-        copilot_configs = {}
-        for k, v in mcp_configs.items():
-            if v.get("url"):
-                transport_type = v.get("type", "sse")
-                copilot_configs[k] = {"type": transport_type, "url": v["url"]}
-                if "env" in v:
-                    copilot_configs[k]["env"] = v["env"]
-            else:
-                copilot_configs[k] = {"type": "stdio", "command": v["command"], "args": v.get("args", [])}
-                if "env" in v:
-                    copilot_configs[k]["env"] = v["env"]
-        copilot_spec = IDE_REGISTRY["copilot"]
-
-        # Build .agent.md with hooks in frontmatter (per-agent hooks)
-        desc_line = (agent.description or safe_name).replace("\n", " ").strip()
-        frontmatter_lines = [
-            "---",
-            f"name: {safe_name}",
-            f'description: "{desc_line}"',
-            "tools: ['*']",
-        ]
-        frontmatter_lines.extend(_vscode_copilot_hooks_frontmatter_lines("observal-hook.sh", "observal-stop-hook.sh"))
-        frontmatter_lines.append("---")
-        agent_content = "\n".join(frontmatter_lines) + "\n\n" + rules_content
-
-        result = {
-            "rules_file": {
-                "path": f".github/agents/{safe_name}.agent.md",
-                "content": agent_content,
-            },
-            "mcp_config": {
-                "path": copilot_spec["mcp_config_path"]["project"],
-                "content": {copilot_spec["mcp_servers_key"]: copilot_configs},
-            },
-            "hooks_config": {
-                "path": ".github/hooks/observal.json",
-                "content": _vscode_copilot_hooks_config("observal-hook.sh", "observal-stop-hook.sh"),
-            },
-            "scope": copilot_spec["default_scope"],
-        }
-        if compatibility_warnings:
-            result["_warnings"] = compatibility_warnings
-        return result
-
-    if ide == "copilot-cli":
-        copilot_cli_configs = {}
-        for k, v in mcp_configs.items():
-            if v.get("url"):
-                transport_type = v.get("type", "sse")
-                copilot_cli_configs[k] = {"type": transport_type, "url": v["url"], "tools": ["*"]}
-                if "env" in v:
-                    copilot_cli_configs[k]["env"] = v["env"]
-            else:
-                copilot_cli_configs[k] = {
-                    "type": "stdio",
-                    "command": v["command"],
-                    "args": v.get("args", []),
-                    "tools": ["*"],
-                }
-                if "env" in v:
-                    copilot_cli_configs[k]["env"] = v["env"]
-        copilot_cli_spec = IDE_REGISTRY["copilot-cli"]
-
-        # Build .agent.md with hooks in frontmatter (per-agent hooks)
-        desc_line = (agent.description or safe_name).replace("\n", " ").strip()
-        frontmatter_lines = [
-            "---",
-            f"name: {safe_name}",
-            f'description: "{desc_line}"',
-            "tools: ['*']",
-        ]
-        frontmatter_lines.extend(_vscode_copilot_hooks_frontmatter_lines("observal-hook.sh", "observal-stop-hook.sh"))
-        frontmatter_lines.append("---")
-        agent_content = "\n".join(frontmatter_lines) + "\n\n" + rules_content
-
-        result = {
-            "rules_file": {
-                "path": f".github/agents/{safe_name}.agent.md",
-                "content": agent_content,
-            },
-            "mcp_config": {
-                "path": copilot_cli_spec["mcp_config_path"]["project"],
-                "content": {copilot_cli_spec["mcp_servers_key"]: copilot_cli_configs},
-            },
-            "hooks_config": {
-                "path": ".github/hooks/observal.json",
-                "content": _vscode_copilot_hooks_config("observal-hook.sh", "observal-stop-hook.sh"),
-            },
-            "scope": copilot_cli_spec["default_scope"],
-        }
-        if compatibility_warnings:
-            result["_warnings"] = compatibility_warnings
-        return result
-
-    if ide == "opencode":
-        opencode_spec = IDE_REGISTRY["opencode"]
-        opencode_scope = options.get("scope", opencode_spec["default_scope"])
-        opencode_configs = {}
-        for k, v in mcp_configs.items():
-            cmd_array = [v["command"], *v.get("args", [])]
-            opencode_configs[k] = {"type": "local", "command": cmd_array}
-            if "env" in v:
-                opencode_configs[k]["env"] = v["env"]
-        rules_path = opencode_spec["rules_file"].get(opencode_scope, "AGENTS.md")
-        mcp_path = opencode_spec["mcp_config_path"].get(
-            opencode_scope, next(iter(opencode_spec["mcp_config_path"].values()))
-        )
-        opencode_content: dict = {opencode_spec["mcp_servers_key"]: opencode_configs}
-        opencode_model = options.get("_resolved_model")
-        if opencode_model:
-            opencode_content["model"] = opencode_model
-        result = {
-            "rules_file": {"path": rules_path, "content": rules_content},
-            "mcp_config": {"path": mcp_path, "content": opencode_content},
-            "hooks_config": {
-                "path": ".opencode/plugins/observal-plugin.mjs",
-                "content": _opencode_plugin_js("observal-hook.sh", "observal-stop-hook.sh"),
-            },
-            "scope": opencode_scope,
-        }
-        warnings_combined = list(compatibility_warnings)
-        warnings_combined.extend(options.get("_model_warnings") or [])
-        if warnings_combined:
-            result["_warnings"] = warnings_combined
-        return result
-
-    # cursor, vscode (and any future IDE with standard rules+mcp pattern)
-    spec = IDE_REGISTRY.get(ide, {})
-    ide_scope = options.get("scope", spec.get("default_scope", "project"))
-    rules_paths = spec.get("rules_file", {})
-    rules_path = rules_paths.get(ide_scope, next(iter(rules_paths.values()), f".rules/{safe_name}.md"))
-    mcp_paths = spec.get("mcp_config_path", {})
-    mcp_path = mcp_paths.get(ide_scope, next(iter(mcp_paths.values()), ".mcp.json"))
-    skill_files = [_generate_skill_file(s, ide, ide_scope) for s in skill_configs]
-    skill_files = [f for f in skill_files if f]
-    result = {
-        "rules_file": {"path": rules_path.format(name=safe_name), "content": rules_content},
-        "mcp_config": {"path": mcp_path, "content": {spec.get("mcp_servers_key", "mcpServers"): mcp_configs}},
-        "scope": ide_scope,
-    }
-    # Add hooks config for IDEs with command hook support
-    if ide == "cursor":
-        hooks_path = ".cursor/hooks.json" if ide_scope == "project" else "~/.cursor/hooks.json"
-        result["hooks_config"] = {
-            "path": hooks_path,
-            "content": _cursor_hooks_config("observal-hook.sh", "observal-stop-hook.sh"),
-        }
-    elif ide == "vscode":
-        result["hooks_config"] = {
-            "path": ".github/hooks/observal.json",
-            "content": _vscode_copilot_hooks_config("observal-hook.sh", "observal-stop-hook.sh"),
-        }
-    if skill_files:
-        result["skill_files"] = skill_files
-    if compatibility_warnings:
-        result["_warnings"] = compatibility_warnings
-    return result
 
 
 async def generate_all_ide_configs(

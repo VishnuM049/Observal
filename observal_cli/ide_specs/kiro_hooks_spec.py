@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-KIRO_HOOK_EVENTS = ("userPromptSubmit", "stop")
+KIRO_HOOK_EVENTS = ("agentSpawn", "userPromptSubmit", "preToolUse", "postToolUse", "stop")
 
 # Parent of the observal_cli package directory
 _PKG_ROOT = str(Path(__file__).resolve().parent.parent.parent)
@@ -30,13 +30,15 @@ def _python_cmd() -> str:
 
 
 def build_kiro_hooks(*_args, **_kwargs) -> dict:
-    """Build the complete hooks dict for a Kiro agent config.
+    """Build the complete hooks dict for a Kiro agent config (all 5 events).
 
-    Only 2 events: userPromptSubmit and stop.
     Legacy callers may pass (hooks_url, agent_name) — ignored.
     """
     cmd = f"{_python_cmd()} -m observal_cli.hooks.kiro_session_push"
     return {
+        "agentSpawn": [{"command": cmd}],
         "userPromptSubmit": [{"command": cmd}],
+        "preToolUse": [{"matcher": "*", "command": cmd}],
+        "postToolUse": [{"matcher": "*", "command": cmd}],
         "stop": [{"command": cmd}],
     }
