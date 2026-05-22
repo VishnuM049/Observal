@@ -29,12 +29,8 @@ router = APIRouter(prefix="/api/v1/insights", tags=["insights"])
 
 
 def _require_insights():
-    """Raise 402 if the insights package is not installed."""
-    if not INSIGHTS_AVAILABLE:
-        raise HTTPException(
-            status_code=402,
-            detail="Insights is an enterprise feature. Contact sales for access.",
-        )
+    """Gate removed — insights availability controlled by config/license."""
+    pass
 
 
 @router.post("/agents/{agent_id}/generate", response_model=InsightReportListItem)

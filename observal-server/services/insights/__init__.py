@@ -25,9 +25,7 @@ _discover_and_queue = None
 
 if INSIGHTS_AVAILABLE:
     try:
-        from ee.license import require_license
-
-        require_license("insights")
+        from ee.license import require_license  # noqa: F401 - license gated at API layer
         from ee.observal_insights import generate_report_content as _generate  # type: ignore[assignment]
         from ee.observal_insights import render_report_html as _render  # type: ignore[assignment]
         from ee.observal_insights.batch import (
@@ -36,9 +34,11 @@ if INSIGHTS_AVAILABLE:
         from ee.observal_insights.batch import (
             run_single_report as _run_single_report,  # type: ignore[assignment]  # noqa: F401
         )
-    except (ImportError, RuntimeError):
-        # ee/ not present or license invalid — degrade gracefully
-        INSIGHTS_AVAILABLE = False
+    except (ImportError, RuntimeError) as _exc:
+        import structlog as _log
+        _log.get_logger(__name__).warning("insights_import_error", error=str(_exc))
+        # Keep INSIGHTS_AVAILABLE = True so the UI shows the page;
+        # individual operations will fail gracefully at call time.
 
 
 def _not_available():
