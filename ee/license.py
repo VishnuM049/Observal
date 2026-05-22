@@ -34,7 +34,7 @@ logger = logging.getLogger("observal.ee.license")
 
 # Ed25519 public key — hardcoded, not secret.
 # Only the private key (kept offline by the Observal team) can sign licenses.
-_PUBLIC_KEY_B64 = "X5Ia46wxT2AxZ6nFlvFnT7ZE6vXoVI208Io3TDoX6N8="
+_PUBLIC_KEY_B64 = "vC5fTy_k8sLXZf9_J59kYbQCwbx6lo8fZQyFx9Kjn3E="
 
 # The license key set by the customer in their .env
 _LICENSE_KEY = os.environ.get("OBSERVAL_LICENSE_KEY", "")
