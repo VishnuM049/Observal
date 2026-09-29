@@ -8,7 +8,7 @@ Revises: 007_invites
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ENUM, UUID
 
 from alembic import op
 
@@ -30,7 +30,7 @@ def downgrade() -> None:
         sa.Column("email", sa.String(255), nullable=True),
         sa.Column(
             "role",
-            sa.Enum("super_admin", "admin", "reviewer", "user", name="userrole", create_type=False),
+            ENUM("super_admin", "admin", "reviewer", "user", name="userrole", create_type=False),
             nullable=False,
         ),
         sa.Column(

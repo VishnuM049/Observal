@@ -8,7 +8,7 @@ Revises: c680c63ced65
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSON, UUID
+from sqlalchemy.dialects.postgresql import ENUM, JSON, UUID
 
 from alembic import op
 
@@ -27,6 +27,11 @@ def upgrade() -> None:
     migration_operation.create(op.get_bind(), checkfirst=True)
     migration_scope.create(op.get_bind(), checkfirst=True)
     migration_status.create(op.get_bind(), checkfirst=True)
+
+    # Explicit creation handles existing types; table creation must not recreate them.
+    migration_operation = ENUM("export", "import", "validate", name="migration_operation", create_type=False)
+    migration_scope = ENUM("postgres", "clickhouse", "both", name="migration_scope", create_type=False)
+    migration_status = ENUM("queued", "running", "completed", "failed", name="migration_status", create_type=False)
 
     op.create_table(
         "migration_jobs",

@@ -8,7 +8,7 @@ Revises: 006_feedback_one_per_user
 """
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import ENUM, UUID
 
 from alembic import op
 
@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("email", sa.String(255), nullable=True),
         sa.Column(
             "role",
-            sa.Enum("super_admin", "admin", "reviewer", "user", name="userrole", create_type=False),
+            ENUM("super_admin", "admin", "reviewer", "user", name="userrole", create_type=False),
             nullable=False,
         ),
         sa.Column(
