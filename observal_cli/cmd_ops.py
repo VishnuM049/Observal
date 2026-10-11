@@ -274,7 +274,9 @@ def review_show(
         _print_folder_candidate(str(item["id"]), candidate)
 
 
-def _review_action_path(review_id: str, action: str, agent: bool, bundle: bool) -> str:
+def _review_action_path(
+    review_id: str, action: str, agent: bool, bundle: bool, *, lookup: bool = True
+) -> tuple[str, dict | None]:
     if agent and bundle:
         fail(
             ErrorCategory.VALIDATION,
@@ -285,10 +287,15 @@ def _review_action_path(review_id: str, action: str, agent: bool, bundle: bool) 
         )
     resolved = quote(config.resolve_alias(review_id, expected_type="review"), safe="")
     if agent:
-        return f"/api/v1/review/agents/{resolved}/{action}"
+        return f"/api/v1/review/agents/{resolved}/{action}", None
     if bundle:
-        return f"/api/v1/review/bundles/{resolved}/{action}"
-    return f"/api/v1/review/{resolved}/{action}"
+        return f"/api/v1/review/bundles/{resolved}/{action}", None
+    if not lookup:
+        return f"/api/v1/review/{resolved}/{action}", None
+    detail = client.get(f"/api/v1/review/{resolved}")
+    if detail.get("type") == "agent":
+        return f"/api/v1/review/agents/{quote(str(detail['id']), safe='')}/{action}", detail
+    return f"/api/v1/review/{resolved}/{action}", detail
 
 
 def _is_folder_review(version: dict) -> bool:
@@ -338,6 +345,7 @@ def _exact_skill_review(
     yes: bool = False,
     ack_git_base: bool = False,
     output: OutputMode | str = "table",
+    detail: dict | None = None,
 ) -> dict | None:
     """Review one exact skill version bound to its observed revision.
 
@@ -348,7 +356,7 @@ def _exact_skill_review(
     resolved = quote(config.resolve_alias(review_id, expected_type="review"), safe="")
     vid = version_id
     if vid is None:
-        detail = client.get(f"/api/v1/review/{resolved}")
+        detail = detail if detail is not None else client.get(f"/api/v1/review/{resolved}")
         if detail.get("type") != "skill" or not detail.get("version_id"):
             return None
         resolved, vid = quote(str(detail["id"]), safe=""), detail["version_id"]
@@ -423,11 +431,11 @@ def review_approve(
 
         observal admin review approve my-skill --revision REVISION
     """
-    path = _review_action_path(review_id, "approve", agent, bundle)
     version_id, revision = _command_value(version_id), _command_value(revision)
+    path, detail = _review_action_path(review_id, "approve", agent, bundle, lookup=not bool(version_id))
     yes, ack_git_base = _command_value(yes), _command_value(ack_git_base)
     result = None
-    if not (agent or bundle):
+    if not (agent or bundle) and (detail is None or detail.get("type") != "agent"):
         result = _exact_skill_review(
             review_id,
             "approve",
@@ -436,6 +444,7 @@ def review_approve(
             yes=yes,
             ack_git_base=ack_git_base,
             output=_command_value(output),
+            detail=detail,
         )
     if result is None:
         with _command_progress(output, "Approving..."):
@@ -476,15 +485,17 @@ def review_reject(
             resource="rejection reason",
             remediation="Provide a concise, non-empty reason.",
         )
-    path = _review_action_path(review_id, "reject", agent, bundle)
+    version_id = _command_value(version_id)
+    path, detail = _review_action_path(review_id, "reject", agent, bundle, lookup=not bool(version_id))
     result = None
-    if not (agent or bundle):
+    if not (agent or bundle) and (detail is None or detail.get("type") != "agent"):
         result = _exact_skill_review(
             review_id,
             "reject",
             reason=reason,
-            version_id=_command_value(version_id),
+            version_id=version_id,
             output=_command_value(output),
+            detail=detail,
         )
     if result is None:
         with _command_progress(output, "Rejecting..."):

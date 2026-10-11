@@ -216,6 +216,26 @@ def test_review_approve_selects_the_expected_endpoint(cli, monkeypatch, agent, b
     assert message in cli.text()
 
 
+@pytest.mark.parametrize("action", ["approve", "reject"])
+def test_review_action_auto_routes_agents_without_flag(cli, monkeypatch, action):
+    calls = []
+    monkeypatch.setattr(ops.config, "resolve_alias", lambda value, expected_type=None: "agent-uuid")
+    monkeypatch.setattr(
+        ops.client, "get", lambda path: calls.append(("get", path)) or {"type": "agent", "id": "agent-uuid"}
+    )
+    monkeypatch.setattr(ops.client, "post", lambda path, *args: calls.append(("post", path)) or {"name": "my-agent"})
+
+    if action == "approve":
+        ops.review_approve("1", False, False)
+    else:
+        ops.review_reject("1", "reason", False, False)
+
+    assert calls == [
+        ("get", "/api/v1/review/agent-uuid"),
+        ("post", f"/api/v1/review/agents/agent-uuid/{action}"),
+    ]
+
+
 def test_review_reject_rejects_blank_reasons(cli):
     with pytest.raises(typer.Exit) as exc_info:
         ops.review_reject("item", "   ", False, False)
