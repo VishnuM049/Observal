@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,17 @@ from observal_cli.shared import launcher
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="requires native cmd.exe and PowerShell")
 _PROBE = "observal_cli.probe"
 _AGENT = "agent-%PATH%-$env:TEMP-'literal'"
+
+
+def test_windows_login_menu_uses_native_console(monkeypatch):
+    import msvcrt
+
+    from observal_cli import prompts
+
+    keys = iter(["x", "2"])
+    monkeypatch.setattr(prompts.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(msvcrt, "getwch", lambda: next(keys))
+    assert prompts.quick_choice("Login method", ["1", "2"]) == "2"
 
 
 def _probe_package(root: Path, marker: str) -> None:
