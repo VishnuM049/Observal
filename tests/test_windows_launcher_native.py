@@ -46,6 +46,22 @@ def test_windows_login_menu_uses_native_console(monkeypatch):
     assert prompts.quick_choice("Login method", ["1", "2"]) == "2"
 
 
+def test_claude_mcp_registration_starts_a_windows_cmd_shim(tmp_path, monkeypatch):
+    import shutil
+
+    from observal_cli.harness.claude_code import ClaudeCodeAdapter
+
+    shim = tmp_path / "npm tools with spaces" / "claude.cmd"
+    shim.parent.mkdir(parents=True)
+    shim.write_text("@echo off\r\necho CLAUDE_SETUP_OK\r\n", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda name: str(shim) if name == "claude.cmd" else None)
+    prepared = ClaudeCodeAdapter().prepare_mcp_setup_command(["claude", "mcp", "add", "srv"], "project")
+    assert prepared == [str(shim), "mcp", "add", "--scope", "project", "srv"]
+    result = subprocess.run(prepared, cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "CLAUDE_SETUP_OK" in result.stdout
+
+
 def _probe_package(root: Path, marker: str) -> None:
     package = root / "observal_cli"
     package.mkdir(parents=True)
