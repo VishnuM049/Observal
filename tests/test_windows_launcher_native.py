@@ -42,7 +42,7 @@ def _probe_package(root: Path, marker: str) -> None:
         "import json, os\n"
         "from pathlib import Path\n"
         f"print(json.dumps({{'marker': {marker!r}, 'file': str(Path(__file__).resolve()), "
-        "'agent': os.environ.get('OBSERVAL_AGENT_ID')}}))\n",
+        "'agent': os.environ.get('OBSERVAL_AGENT_ID')}))\n",
         encoding="utf-8",
     )
 
