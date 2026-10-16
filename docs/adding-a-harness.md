@@ -561,7 +561,9 @@ observal doctor patch --harness my-harness --dry-run
 observal reconcile --harness my-harness --dry-run
 ```
 
-## Component evidence (skills and hooks)
+## Component evidence (MCPs, skills and hooks)
+
+MCP, skill and hook projectors all publish through `EvidenceSpec` in `services/component_activity/evidence_projector.py`. An activity job shares one bounded initial source snapshot across supported extractors; each attempted complete publication still reloads the source and mapping to reject changes during processing. Identity-conflict zero-row publications also perform a fresh source and conflict-state check. Read-side generation and projection-state SQL builders live in `services/component_activity/queries.py`.
 
 Component Insights count skill and hook evidence only where it is proven for the harness. Setting `skill_evidence_extractor` or `hook_evidence_extractor` in the registry establishes nothing on its own: the id must resolve to an implementation in `services/session_parsers/`, and each (type × harness) cell needs all of the following, from recorded, sanitized sessions in `tests/fixtures/component_insights/<harness>/`:
 

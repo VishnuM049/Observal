@@ -35,8 +35,10 @@ from services.component_activity.queries import (
     _clickhouse_array,
     _rows,
     encode_cursor,
+    latest_publication_sql,
+    marker_states_sql,
+    projection_state_sql,
 )
-from services.component_activity.skill_queries import latest_publication_sql, marker_states_sql, projection_state_sql
 from services.layer_components.queries import (
     PRESENCE_COHORT_SQL,
     presence_coverage,

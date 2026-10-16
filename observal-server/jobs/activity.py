@@ -19,7 +19,7 @@ from services.component_activity import (
     publication_version,
 )
 from services.component_activity.hook_projector import MAX_SUBAGENT_SESSIONS, subagent_sessions
-from services.component_activity.projector import ProjectionRaceError
+from services.component_activity.projector import ProjectionRaceError, SourceSnapshot
 from services.session_parsers.hook_evidence import hook_extractor
 
 _MAX_RETRIES = 5
@@ -138,13 +138,14 @@ async def project_component_activity(
     """
     if not 0 <= retry_count <= _MAX_RETRIES:
         raise ValueError("Activity retry count is out of bounds")
-    result = await project_session_activity(project_id, user_id, harness, session_id)
+    source_snapshot = SourceSnapshot(project_id, user_id, harness, session_id)
+    result = await project_session_activity(project_id, user_id, harness, session_id, source_snapshot=source_snapshot)
     # Skill and hook evidence are independent projections: their outcomes never
     # change the MCP result, and a failure in one never blocks another.
     extra: dict[str, dict] = {}
     for name, project in (("skill", project_session_skill_evidence), ("hook", project_session_hook_evidence)):
         try:
-            extra[name] = await project(project_id, user_id, harness, session_id)
+            extra[name] = await project(project_id, user_id, harness, session_id, source_snapshot=source_snapshot)
         except Exception as error:
             optic.warning("{} evidence projection failed: {}", name, _describe(error))
             extra[name] = {"status": "failed"}

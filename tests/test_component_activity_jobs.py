@@ -44,6 +44,29 @@ async def test_final_enqueue_is_scoped_and_redis_failure_cannot_fail_ingest(monk
 
 
 @pytest.mark.asyncio
+async def test_job_shares_one_initial_source_but_not_the_final_rechecks(monkeypatch):
+    from services.component_activity import projector
+
+    source = [_session("p", "u", "claude-code", "s")]
+    load = AsyncMock(return_value=source)
+    monkeypatch.setattr(projector, "_source_rows", load)
+    seen = []
+
+    async def project(_project, _user, _harness, _session_id, *, source_snapshot):
+        seen.append(source_snapshot)
+        assert await source_snapshot.load() is source
+        return {"status": "complete"}
+
+    monkeypatch.setattr(activity, "project_session_activity", project)
+    monkeypatch.setattr(activity, "project_session_skill_evidence", project)
+    monkeypatch.setattr(activity, "project_session_hook_evidence", project)
+    result = await activity.project_component_activity({}, "p", "u", "claude-code", "s")
+    assert result["status"] == result["skill"]["status"] == result["hook"]["status"] == "complete"
+    assert seen[0] is seen[1] is seen[2]
+    load.assert_awaited_once_with(projector._params("p", "u", "claude-code", "s"))
+
+
+@pytest.mark.asyncio
 async def test_pending_mapping_and_source_retry_are_bounded_not_complete(monkeypatch):
     projector = AsyncMock(return_value={"status": "pending_mapping"})
     redis = SimpleNamespace(enqueue_job=AsyncMock(return_value=object()))
