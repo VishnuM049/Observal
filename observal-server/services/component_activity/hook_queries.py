@@ -30,17 +30,16 @@ from services.component_activity.projector import MAX_SOURCE_BYTES, MAX_SOURCE_R
 from services.component_activity.queries import (
     _ACTIVATIONS,
     _HARNESSES,
-    cohort_session_joins_sql,
     CursorScope,
     _clickhouse_array,
     _rows,
+    cohort_session_joins_sql,
     encode_cursor,
     latest_publication_sql,
     marker_states_sql,
     projection_state_sql,
 )
 from services.layer_components.queries import (
-    PRESENCE_COHORT_SQL,
     presence_coverage,
     presence_params,
     presence_version_distribution,
