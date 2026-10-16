@@ -29,7 +29,7 @@ from services.component_activity.projector import MAX_SOURCE_BYTES, MAX_SOURCE_R
 from services.component_activity.queries import (
     _ACTIVATIONS,
     _HARNESSES,
-    _SOURCE_STATES,
+    cohort_session_joins_sql,
     CursorScope,
     _clickhouse_array,
     _rows,
@@ -88,21 +88,8 @@ _SKILL_SESSIONS = (
            p.unknown_result_count AS unknown_result_count,
            e.available_facts AS available_facts, e.confirmed_loads AS confirmed_loads,
            e.load_attempts AS load_attempts, e.invocations AS invocations
-    FROM ("""
-    + PRESENCE_COHORT_SQL
-    + """) AS c
-    LEFT JOIN ("""
-    + _LATEST_SKILL_PUBLICATION
-    + """) AS p ON c.user_id = p.user_id AND c.harness = p.harness AND c.session_id = p.session_id
-    LEFT JOIN ("""
-    + _SKILL_MARKER_STATES
-    + """) AS m ON c.user_id = m.user_id AND c.harness = m.harness AND c.session_id = m.session_id
-    LEFT JOIN ("""
-    + _SOURCE_STATES
-    + """) AS s ON c.user_id = s.user_id AND c.harness = s.harness AND c.session_id = s.session_id
-    LEFT JOIN ("""
-    + _SKILL_EVIDENCE
-    + """) AS e ON c.user_id = e.user_id AND c.harness = e.harness AND c.session_id = e.session_id"""
+"""
+    + cohort_session_joins_sql(_LATEST_SKILL_PUBLICATION, _SKILL_MARKER_STATES, _SKILL_EVIDENCE, "e")
 )
 
 _SKILL_SUMMARY = (

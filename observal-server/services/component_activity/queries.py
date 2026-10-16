@@ -99,6 +99,35 @@ def projection_state_sql(supported: str = "{supported:Array(String)}") -> tuple[
     return source, projection
 
 
+def cohort_session_joins_sql(publication: str, markers: str, evidence: str, alias: str) -> str:
+    """One scoped presence cohort, joined to source, publication and type-specific rows.
+
+    The caller supplies only its evidence columns and predicate. Keep the
+    publication and source joins identical across MCP, skill and hook reads.
+    """
+    if alias not in ("a", "e"):
+        raise ValueError("unknown evidence alias")
+    return (
+        """    FROM ("""
+        + PRESENCE_COHORT_SQL
+        + """) AS c
+    LEFT JOIN ("""
+        + publication
+        + """) AS p ON c.user_id = p.user_id AND c.harness = p.harness AND c.session_id = p.session_id
+    LEFT JOIN ("""
+        + markers
+        + """) AS m ON c.user_id = m.user_id AND c.harness = m.harness AND c.session_id = m.session_id
+    LEFT JOIN ("""
+        + _SOURCE_STATES
+        + """) AS s ON c.user_id = s.user_id AND c.harness = s.harness AND c.session_id = s.session_id
+    LEFT JOIN ("""
+        + evidence
+        + """) AS """
+        + alias
+        + f" ON c.user_id = {alias}.user_id AND c.harness = {alias}.harness AND c.session_id = {alias}.session_id"
+    )
+
+
 # All evidence types use the same published-generation selection rules.
 _LATEST_PUBLICATION = latest_publication_sql("mcp")
 _MARKER_STATES = marker_states_sql("mcp")
@@ -156,21 +185,8 @@ _SESSIONS = (
            p.unknown_result_count AS unknown_result_count,
            a.calls AS calls, a.successes AS successes, a.errors AS errors, a.unknowns AS unknowns,
            a.refs AS refs
-    FROM ("""
-    + PRESENCE_COHORT_SQL
-    + """) AS c
-    LEFT JOIN ("""
-    + _LATEST_PUBLICATION
-    + """) AS p ON c.user_id = p.user_id AND c.harness = p.harness AND c.session_id = p.session_id
-    LEFT JOIN ("""
-    + _MARKER_STATES
-    + """) AS m ON c.user_id = m.user_id AND c.harness = m.harness AND c.session_id = m.session_id
-    LEFT JOIN ("""
-    + _SOURCE_STATES
-    + """) AS s ON c.user_id = s.user_id AND c.harness = s.harness AND c.session_id = s.session_id
-    LEFT JOIN ("""
-    + _COMPONENT_ACTIVITY
-    + """) AS a ON c.user_id = a.user_id AND c.harness = a.harness AND c.session_id = a.session_id"""
+"""
+    + cohort_session_joins_sql(_LATEST_PUBLICATION, _MARKER_STATES, _COMPONENT_ACTIVITY, "a")
 )
 
 _SUMMARY = (
