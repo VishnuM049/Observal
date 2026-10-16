@@ -27,28 +27,32 @@ class ProjectionRaceError(RuntimeError):
     """
 
 
-# 2: activity rows carry evidence_kind and publications evidence_type, so MCP
-# and skill projections complete independently (ClickHouse migration 008).
-# 3: hook extraction no longer counts runs of Observal's own telemetry hooks as
-# unmatched candidates; the bump replays hook publications made before the fix.
+# Every projection or matcher change must invalidate all three evidence types
+# together: readers and the full-replay checkpoint use the same UInt16 key.
+# 2: activity rows carry evidence_kind and publications evidence_type.
+# 3: hook extraction excludes Observal telemetry hooks from unmatched candidates.
 PROJECTION_VERSION = 3
 # 2: result-link ordering changed. 3: harness-reported server identity (Pi).
-# Every bump makes old publications invisible until the durable full replay
-# (``jobs.activity.replay_activity_revision``) republishes them.
 MATCHER_VERSION = 3
 MAX_SOURCE_RECORDS = 50_000
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
 
 
 def publication_version() -> int:
-    """The pinned UInt16 key packs independent projection/matcher revisions.
+    """Pack projection, MCP, skill and hook revisions without collisions in UInt16.
 
-    Both constants are 1..255. A matcher-only bump changes the publication key
-    even for zero-row sessions, without adding fields to the pinned 007 DDL.
+    A change to any matcher invalidates every reader's prior publications and
+    triggers the bounded full replay. Extending any field beyond 15 needs a
+    schema/versioning change rather than silent wraparound. The packing change
+    itself invalidates older publications (which used only MCP's version).
     """
-    if not (1 <= PROJECTION_VERSION <= 255 and 1 <= MATCHER_VERSION <= 255):
-        raise ValueError("Activity publication versions must each fit a nonzero UInt8")
-    return PROJECTION_VERSION << 8 | MATCHER_VERSION
+    from .hook_matcher import HOOK_MATCHER_VERSION
+    from .skill_matcher import SKILL_MATCHER_VERSION
+
+    versions = (PROJECTION_VERSION, MATCHER_VERSION, SKILL_MATCHER_VERSION, HOOK_MATCHER_VERSION)
+    if not all(1 <= version <= 15 for version in versions):
+        raise ValueError("Activity publication versions must each fit a nonzero UInt4")
+    return sum(version << shift for version, shift in zip(versions, (12, 8, 4, 0), strict=True))
 
 
 async def _query(sql: str, params: dict | None = None, *, data: str | None = None) -> list[dict]:

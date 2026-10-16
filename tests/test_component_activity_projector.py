@@ -154,10 +154,11 @@ async def test_rows_acknowledged_before_complete_marker_and_never_store_content(
 async def test_zero_call_publication_and_matcher_only_bump_rebuilds_even_without_rows(monkeypatch):
     sources = [_source(0, [{"type": "text"}])]
     writes = []
-    # Publication versions pack (projection << 8 | matcher); derive them so a
-    # projection-version bump does not invalidate what this test checks.
-    v_matcher2 = projector.PROJECTION_VERSION << 8 | 2
-    v_matcher3 = projector.PROJECTION_VERSION << 8 | 3
+    # Derive the composite version after a matcher-only bump.
+    monkeypatch.setattr(projector, "MATCHER_VERSION", 2)
+    v_matcher2 = projector.publication_version()
+    monkeypatch.setattr(projector, "MATCHER_VERSION", 3)
+    v_matcher3 = projector.publication_version()
     previous = {v_matcher2: None, v_matcher3: None}
     monkeypatch.setattr(projector, "MATCHER_VERSION", 2)
 
@@ -197,6 +198,23 @@ async def test_zero_call_publication_and_matcher_only_bump_rebuilds_even_without
     assert [marker["attributed_count"] for marker in writes] == [0, 0]
     monkeypatch.setattr(projector, "MATCHER_VERSION", 256)
     with pytest.raises(ValueError):
+        projector.publication_version()
+
+
+def test_skill_and_hook_matcher_bumps_invalidate_readers_and_full_replay(monkeypatch):
+    from jobs import activity
+    from services.component_activity import hook_matcher, queries, skill_matcher
+
+    current = projector.publication_version()
+    assert activity.publication_version() == current  # replay checkpoint follows the readers
+    assert queries.publication_version() == current  # readers use the same version
+    monkeypatch.setattr(skill_matcher, "SKILL_MATCHER_VERSION", skill_matcher.SKILL_MATCHER_VERSION + 1)
+    skill_bump = projector.publication_version()
+    assert skill_bump != current and queries.publication_version() == activity.publication_version() == skill_bump
+    monkeypatch.setattr(hook_matcher, "HOOK_MATCHER_VERSION", hook_matcher.HOOK_MATCHER_VERSION + 1)
+    assert projector.publication_version() not in (current, skill_bump)
+    monkeypatch.setattr(hook_matcher, "HOOK_MATCHER_VERSION", 16)
+    with pytest.raises(ValueError, match="UInt4"):
         projector.publication_version()
 
 

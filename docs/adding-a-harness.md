@@ -578,11 +578,10 @@ Sessions are projected once per publication version. Changing an extractor or ma
 
 | Constant | Where | What a bump does |
 |---|---|---|
-| `PROJECTION_VERSION`, `MATCHER_VERSION` | `services/component_activity/projector.py` | Changes the publication key. Every older publication is hidden (reported as stale) until `replay_activity_revision`, which runs every 5 minutes, has republished **all** historical sessions. |
+| `PROJECTION_VERSION`, `MATCHER_VERSION`, `SKILL_MATCHER_VERSION`, `HOOK_MATCHER_VERSION` | `services/component_activity/projector.py` and the per-type matcher modules | All four make up the UInt16 publication key. Bumping any one hides previous publications (reported as stale) until `replay_activity_revision` has republished historical sessions. Each value must fit 1–15; changing that range requires a schema/versioning change. |
 | `CURRENT_EXTRACTOR_VERSION` | `services/layer_components/__init__.py` | Every layer snapshot is re-extracted by `backfill_layer_components` (daily, resumable). Presence is reported as stale until it is. |
-| `HOOK_MATCHER_VERSION` and other per-evidence matcher versions | `services/component_activity/hook_matcher.py` and friends | Stamped on each row for auditing only. Triggers nothing. |
 
-Bump `PROJECTION_VERSION` (or `CURRENT_EXTRACTOR_VERSION` for layer rules) when the change would make **already published** numbers wrong in a way that matters, for example a rule that wrongly counted evidence (a false positive). The replay costs a scan of every stored session, and reports show stale coverage until it finishes, so do not bump for:
+Bump the relevant matcher version (or `PROJECTION_VERSION` for shared activity rules, `CURRENT_EXTRACTOR_VERSION` for layer rules) when a change would make **already published** numbers wrong in a way that matters, for example a rule that wrongly counted evidence (a false positive). The replay costs a scan of every stored session, and reports show stale coverage until it finishes, so do not bump for:
 
 * changes that only add evidence kinds or recognise more of it: older sessions keep their smaller, still-true numbers;
 * changes that only make older results more conservative than the new rule would.

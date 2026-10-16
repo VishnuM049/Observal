@@ -240,6 +240,8 @@ observal ops insights show --component skill alice/review latest
 
 Periods accept 1 through 90 days. Component reports count only sessions where the component was verified present. If there are none, generation returns 422 with the coverage instead of a zero-use report.
 
+**Trust boundary:** “verified present” means the server checked consistency of the client's uploaded snapshot, drift claims and transcript; it does not independently attest to the user's files, harness execution or session contents. A user can fabricate their own presence and usage. Treat these as owner-facing, self-reported observations, not fraud-resistant rankings, recommendations or review/approval signals.
+
 MCP reports count attributed calls. They can add model-written findings when insights are configured.
 
 Skill reports are deterministic. They count present sessions, sessions with a confirmed load (the skill's file text entered the model's context), sessions with an explicit invocation, and sessions where the skill was offered. Each harness records a different subset:
