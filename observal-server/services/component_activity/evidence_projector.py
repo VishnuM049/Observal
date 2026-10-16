@@ -119,7 +119,7 @@ async def project_session_evidence(
         if status == "pending_mapping" and await _index_layer(project_id, user_id, layer_hash):
             status, generation, mapped = await _mapping(project_id, user_id, layer_hash, harness, kind)
         if status == "identity_conflict":
-            return await _publish_unattributable(params, version, revision, unattributed, layer_hash, kind)
+            return await _publish_unattributable(params, version, revision, source, unattributed, layer_hash, kind)
         if status != "complete":
             return {"status": status, "publication_version": version, "layer_hash": layer_hash, **unattributed}
         candidates[layer_hash] = mapped

@@ -357,6 +357,67 @@ async def test_current_snapshot_conflict_invalidates_an_earlier_complete_mapping
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("evidence_type", ["mcp", "skill", "hook"])
+@pytest.mark.parametrize("change", ["source", "mapping"])
+async def test_conflict_zero_marker_fails_when_inputs_change_before_publication(monkeypatch, evidence_type, change):
+    source = [_source(0, [_call("super-probe", "safe")])]
+    current = source if change == "mapping" else [source[0] | {"layer_hash": _HASH_B}]
+    writes = []
+
+    async def fake_query(sql, params=None, *, data=None):
+        writes.append(json.loads(data))
+        return []
+
+    monkeypatch.setattr(projector, "_query", fake_query)
+    fresh_source = AsyncMock(return_value=current)
+    fresh_mapping = AsyncMock(return_value=("complete" if change == "mapping" else "identity_conflict", 9, []))
+    monkeypatch.setattr(projector, "_source_rows", fresh_source)
+    monkeypatch.setattr(projector, "_mapping", fresh_mapping)
+    monkeypatch.setattr(projector, "next_projection_generation", AsyncMock(return_value=71))
+    with pytest.raises(projector.ProjectionRaceError, match="conflicted mapping changed"):
+        await projector._publish_unattributable(
+            projector._params("p", "u", "claude-code", "s"),
+            projector.publication_version(),
+            projector._source_revision(source),
+            source,
+            {"candidate_count": 1, "unmatched_count": 1, "unknown_result_count": 0},
+            _HASH_A,
+            evidence_type,
+        )
+    fresh_source.assert_awaited_once()
+    if change == "mapping":
+        fresh_mapping.assert_awaited_once_with("p", "u", _HASH_A, "claude-code", evidence_type)
+    assert [row["status"] for row in writes] == ["failed"]
+    assert writes[0]["evidence_type"] == evidence_type
+
+
+@pytest.mark.asyncio
+async def test_conflict_zero_marker_rechecks_stable_source_and_conflict(monkeypatch):
+    source = [_source(0, [_call("super-probe", "safe")])]
+    writes = []
+
+    async def fake_query(sql, params=None, *, data=None):
+        writes.append(json.loads(data))
+        return []
+
+    monkeypatch.setattr(projector, "_query", fake_query)
+    monkeypatch.setattr(projector, "_source_rows", AsyncMock(return_value=source))
+    monkeypatch.setattr(projector, "_mapping", AsyncMock(return_value=("identity_conflict", 8, [])))
+    monkeypatch.setattr(projector, "next_projection_generation", AsyncMock(return_value=72))
+    result = await projector._publish_unattributable(
+        projector._params("p", "u", "claude-code", "s"),
+        projector.publication_version(),
+        projector._source_revision(source),
+        source,
+        {"candidate_count": 1, "unmatched_count": 1, "unknown_result_count": 0},
+        _HASH_A,
+    )
+    assert result["status"] == "identity_conflict"
+    assert [row["status"] for row in writes] == ["complete"]
+    assert writes[0]["attributed_count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_pending_mapping_indexes_a_snapshot_the_upload_could_not_see(monkeypatch):
     """Async inserts hide a fresh snapshot from its upload's extraction; the projector indexes it."""
     source = [_source(0, [_call("super-probe", "safe")])]

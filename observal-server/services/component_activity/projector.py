@@ -300,11 +300,37 @@ async def _marker(
 
 
 async def _publish_unattributable(
-    params: dict, version: int, revision: str, unattributed: dict, layer_hash: str, evidence_type: str = "mcp"
+    params: dict,
+    version: int,
+    revision: str,
+    source_rows: list[dict],
+    unattributed: dict,
+    layer_hash: str,
+    evidence_type: str = "mcp",
 ) -> dict:
     counts = {"attributed_count": 0, "collision_count": 0, **unattributed}
     generation = await next_projection_generation()
     try:
+        # A conflict publishes a complete zero-row generation. It needs the same
+        # fresh-source check as a normal complete marker, plus a fresh conflict
+        # check: otherwise a repaired source/mapping could be hidden by this zero.
+        current = await _source_rows(params)
+        if (
+            current is None
+            or _source_revision(current) != revision
+            or _source_facts(current) != _source_facts(source_rows)
+            or (
+                await _mapping(
+                    params["param_project_id"],
+                    params["param_user_id"],
+                    layer_hash,
+                    params["param_harness"],
+                    evidence_type,
+                )
+            )[0]
+            != "identity_conflict"
+        ):
+            raise ProjectionRaceError("Canonical source or conflicted mapping changed during publication")
         await _marker(params, version, generation, "complete", revision, counts, evidence_type)
     except Exception:
         try:
@@ -394,7 +420,7 @@ async def project_session_activity(
             # Supersede any earlier positive publication: a conflicted identity
             # cannot keep showing attributed calls. Every candidate stays an
             # explicit unmatched count ("attribution not possible"), never zero use.
-            return await _publish_unattributable(params, version, revision, unattributed, layer_hash)
+            return await _publish_unattributable(params, version, revision, source, unattributed, layer_hash)
         if status != "complete":
             return {
                 "status": status,
