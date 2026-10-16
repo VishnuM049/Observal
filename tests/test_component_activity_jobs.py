@@ -221,7 +221,7 @@ async def test_revision_replay_uses_persisted_cursor_and_recovers_after_enqueue_
 
 
 @pytest.mark.asyncio
-async def test_revision_replay_retries_failed_sessions_in_following_pass(monkeypatch):
+async def test_revision_replay_completes_after_persistent_failures_without_rescanning(monkeypatch):
     values = {}
 
     async def get(key):
@@ -236,16 +236,22 @@ async def test_revision_replay_retries_failed_sessions_in_following_pass(monkeyp
     async def delete(key):
         values.pop(key, None)
 
-    redis = SimpleNamespace(get=get, set=set_value, incrby=incrby, delete=delete)
-    backfill = AsyncMock(
-        side_effect=[
-            {"next_cursor": None, "failed": 1},
-            {"next_cursor": None, "failed": 0},
-        ]
-    )
+    redis = SimpleNamespace(get=get, set=set_value, incrby=incrby, delete=delete, enqueue_job=AsyncMock())
+    cursor = ["project", "owner", "claude-code", "last-session"]
+    backfill = AsyncMock(side_effect=[{"next_cursor": cursor, "failed": 1}, {"next_cursor": None, "failed": 1}])
+    warnings = []
+    monkeypatch.setattr(activity.optic, "warning", lambda message, *args: warnings.append(message.format(*args)))
     monkeypatch.setattr(activity, "backfill_component_activity", backfill)
-    assert (await activity.replay_activity_revision({"redis": redis}))["status"] == "retry"
-    assert (await activity.replay_activity_revision({"redis": redis}))["status"] == "complete"
+    assert (await activity.replay_activity_revision({"redis": redis}))["status"] == "continuing"
+    completed = await activity.replay_activity_revision({"redis": redis})
+    assert completed["status"] == "complete" and completed["failed_total"] == 2
+    assert backfill.await_args.kwargs["after"] == cursor
+    assert "failures=2" in warnings[-1]
+    key = f"observal:activity:full-replay:{activity.publication_version()}"
+    assert await redis.get(key) == "complete"
+    assert await redis.get(f"{key}:failures") is None
+    for _ in range(3):
+        assert (await activity.replay_activity_revision({"redis": redis}))["status"] == "complete"
     assert backfill.await_count == 2
 
 

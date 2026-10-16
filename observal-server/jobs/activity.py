@@ -314,6 +314,8 @@ async def replay_activity_revision(ctx: dict) -> dict:
     The Redis checkpoint advances only after a bounded page completes. A crash
     or enqueue failure can repeat a page but cannot skip it; the scheduled job
     resumes the checkpoint even when the immediate continuation was lost.
+    Failed projections are counted and logged, but do not restart the full replay;
+    the daily recency backfill retries recent sessions.
     """
     redis = ctx["redis"]
     version = publication_version()
@@ -331,14 +333,11 @@ async def replay_activity_revision(ctx: dict) -> dict:
     cursor = result["next_cursor"]
     if cursor is None:
         failures = int(await redis.get(failed_key) or 0)
-        if failures:
-            # Retry transient projection errors in another scheduled pass.
-            await redis.set(key, "")
-            await redis.delete(failed_key)
-            optic.warning("activity full replay will retry: version={} failures={}", version, failures)
-            return {"status": "retry", "publication_version": version, **result}
         await redis.set(key, "complete")
-        return {"status": "complete", "publication_version": version, **result}
+        if failures:
+            optic.warning("activity full replay completed with failures: version={} failures={}", version, failures)
+        await redis.delete(failed_key)
+        return {"status": "complete", "publication_version": version, **result, "failed_total": failures}
     await redis.set(key, json.dumps(cursor))
     try:
         digest = hashlib.sha256(json.dumps(cursor, separators=(",", ":")).encode()).hexdigest()[:24]
