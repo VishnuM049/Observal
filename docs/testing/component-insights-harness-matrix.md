@@ -3,7 +3,7 @@
 
 # Component Insights harness matrix: bounded Codex skill availability
 
-This work is **stacked on draft #1779**, not a replacement for its verified-only installation contract. Discovery used temporary harness homes and an isolated loopback-only Compose project. No historical installation was inferred from current configuration, a transcript tool name, a skill mention, an Agent pin, or a manual reconcile. Raw sessions, credentials, arguments, prompts and provider responses are not fixtures or PR artifacts.
+This work is **stacked on draft #1779**, not a replacement for its verified-only installation contract. [Current status and next gates](component-insights-matrix-roadmap.md) are tracked separately. Discovery used temporary harness homes and an isolated loopback-only Compose project. No historical installation was inferred from current configuration, a transcript tool name, a skill mention, an Agent pin, or a manual reconcile. Raw sessions, credentials, arguments, prompts and provider responses are not fixtures or PR artifacts.
 
 ## Implemented cell
 
@@ -22,7 +22,7 @@ The skill summary now separates an **availability** projection from the **use** 
 - **Cursor Agent 2026.10.14:** Real accepted and rejected inert MCP attempts, skill-file reads and name mentions were controlled. MCP success/pong was in the live stream, **not** persisted JSONL; the persisted attempt cannot distinguish denial from success. A file read is not a native skill-invocation identity. Temporary delivery hooks sent four sessions, but did not record attributable component hook runs. No cell opted in.
 - **Codex MCP/hooks:** Real provider sessions and vetted temporary hook markers demonstrated Codex's session delivery. An executed MCP `ping` was never established. A printed hook marker and a native developer-message output do not establish a registry hook's attributable execution identity. Explicit `$skill` expansion was recorded, but no native invocation-origin flag distinguishes that expansion from crafted user text, so `invoked` and `load` remain unsupported.
 
-Tracked MCP `--apply` still supports Claude Code only. Extending it to these runtimes requires their native config formats, install receipts, shadow checks, ambiguity tests and a new live tracked delivery proof. Manual scratch MCP entries cannot supply the verified denominator. The Kiro IDE and CLI need distinct capability/projection handling before opting in IDE-only MCP or skill cells. Unverified versions and unsupported cells are **unknown**, never success, failure or measured zero.
+The stacked follow-up now permits stdio-only tracked MCP `--apply` on tested Kiro CLI 2.32.0, Codex CLI 0.163.0, and Cursor Agent 2026.10.14, subject to native configuration, shadow, trust, version, drift, and privacy checks. Real registry installs in isolated homes were pinned and verified, and each harness completed a no-tool native session. This establishes installed config—not an attributable executed call or automatic delivery from the new homes. Cursor still requires separate per-session MCP approval. HTTP/extra options, Kiro IDE identity and untested versions remain unsupported; no new MCP evidence extractor is enabled. Manual scratch MCP entries and an Agent pin alone still cannot supply a verified denominator. Kiro IDE and CLI need distinct capability/projection handling before opting in IDE-only cells. Unsupported evidence is **unknown**, never success, failure or measured zero.
 
 ## Local checks and review boundary
 
