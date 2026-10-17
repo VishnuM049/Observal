@@ -59,6 +59,29 @@ class CodexAdapter(BaseAdapter):
     def harness_name(self) -> str:
         return "codex"
 
+    def skill_manifest_path(self, scope: str, alias: str) -> str | None:
+        # Only the project layout has a verified, recorded native listing.
+        return f"project:.agents/skills/{alias}/SKILL.md" if scope == "project" else None
+
+    def skill_location(self, scope: str, directory: str | None, alias: str) -> str | None:
+        if scope != "project" or not directory:
+            return None
+        # Codex's roots on macOS use the canonical /private/tmp path, not /tmp.
+        return str((Path(directory) / ".agents" / "skills" / alias / "SKILL.md").resolve())
+
+    def skill_shadow_paths(self, scope: str, directory: str | None, alias: str) -> list[Path]:
+        if scope != "project" or not directory:
+            return []
+        # Codex can discover skills in the user home and parent workspaces.
+        # A same-named skill anywhere else makes this project's identity unclear.
+        root = Path(directory).resolve()
+        parents = [parent / ".agents" / "skills" / alias / "SKILL.md" for parent in root.parents]
+        return [
+            Path.home() / ".agents" / "skills" / alias / "SKILL.md",
+            Path.home() / ".codex" / "skills" / alias / "SKILL.md",
+            *parents,
+        ]
+
     @staticmethod
     def _session_id(path: Path) -> str:
         match = re.search(r"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$", path.stem)
