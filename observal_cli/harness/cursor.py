@@ -83,13 +83,26 @@ class CursorAdapter(BaseAdapter):
             return None
         transcript = str(event.get("transcriptPath") or event.get("transcript_path") or "")
         path = Path(transcript) if transcript else None
+        cwd = str(event.get("workspacePath") or event.get("cwd") or "")
+        if not cwd:
+            # Cursor Agent 2026.10.14 sends workspace_roots (not workspacePath)
+            # at sessionEnd. Multiple roots cannot identify one installed project.
+            roots = event.get("workspace_roots")
+            if isinstance(roots, list) and len(roots) == 1 and isinstance(roots[0], str):
+                candidate = roots[0]
+                if Path(candidate).is_absolute() and Path(candidate).is_dir():
+                    cwd = candidate
         if path is None or not path.is_file():
-            workspace = str(event.get("workspacePath") or event.get("cwd") or "")
-            roots = event.get("workspace_roots") or []
-            cwd = workspace or (str(roots[0]) if roots else "")
             path = find_cursor_jsonl(session_id, project_key_from_cwd(cwd), home=home)
-        else:
-            cwd = str(event.get("workspacePath") or event.get("cwd") or "")
+        elif cwd and not (event.get("workspacePath") or event.get("cwd")):
+            # A roots-only project must also agree with the native transcript
+            # directory before it can carry a version-pinned layer identity.
+            try:
+                relative = path.resolve().relative_to((home or Path.home()).resolve() / ".cursor/projects")
+                if not relative.parts or relative.parts[0] != project_key_from_cwd(cwd):
+                    cwd = ""
+            except ValueError:
+                cwd = ""
         if path is None:
             return None
         parent_session_id = get_parent_session_id(path)
