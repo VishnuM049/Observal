@@ -427,11 +427,22 @@ def _check_cursor(issues: list, warnings: list):
         return
 
     hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        issues.append(f"{hooks_path}: hooks must be a JSON object.")
+        return
     has_session_push = False
-    for event in ("beforeSubmitPrompt", "stop"):
+    for event in ("beforeSubmitPrompt", "stop", "sessionEnd"):
         entries = hooks.get(event, [])
-        for e in entries:
-            if "hooks.session_push --harness cursor" in e.get("command", ""):
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            command = entry.get("command", "")
+            if isinstance(command, str) and (
+                "hooks.session_push --harness cursor" in command
+                or (event == "sessionEnd" and "hooks.cursor_mcp_evidence --event end" in command)
+            ):
                 has_session_push = True
                 break
 
@@ -439,6 +450,11 @@ def _check_cursor(issues: list, warnings: list):
         warnings.append(
             "Cursor session push hooks not installed. Run `observal doctor patch --harness cursor` to inject them."
         )
+    if any(event in hooks for event in ("sessionStart", "beforeMCPExecution", "afterMCPExecution", "sessionEnd")):
+        from observal_cli.hooks.cursor_mcp_evidence import _hooks_hash
+
+        if _hooks_hash(Path.home()) is None:
+            warnings.append("Cursor MCP evidence hooks are incomplete or shadowed; MCP use remains unmeasurable.")
 
 
 def _check_codex(issues: list, warnings: list):
@@ -1030,6 +1046,19 @@ def _cleanup_pi(dry_run: bool) -> bool:
     return changed
 
 
+def _is_managed_cursor_hook(entry: object) -> bool:
+    """Match only Observal-owned hook commands, never a foreign substring."""
+    command = entry.get("command") if isinstance(entry, dict) else None
+    return isinstance(command, str) and any(
+        marker in command
+        for marker in (
+            "cursor_session_push",
+            "observal_cli.hooks.session_push",
+            "observal_cli.hooks.cursor_mcp_evidence",
+        )
+    )
+
+
 def _cleanup_cursor(dry_run: bool) -> bool:
     """Remove Observal hooks from ~/.cursor/hooks.json."""
     rprint("[cyan]Cursor[/cyan]")
@@ -1041,17 +1070,15 @@ def _cleanup_cursor(dry_run: bool) -> bool:
     data = _read_json_object(hooks_path)
 
     hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("Cursor hooks must be a JSON object")
     changed = False
     removed_events = []
 
     for event, entries in list(hooks.items()):
         if not isinstance(entries, list):
             continue
-        cleaned = [
-            h
-            for h in entries
-            if "cursor_session_push" not in h.get("command", "") and "session_push" not in h.get("command", "")
-        ]
+        cleaned = [entry for entry in entries if not _is_managed_cursor_hook(entry)]
         if len(cleaned) < len(entries):
             removed_events.append(f"{event} ({len(entries) - len(cleaned)} removed)")
             if not dry_run:
@@ -1433,12 +1460,20 @@ def _patch_cursor(dry_run: bool) -> bool:
     from observal_cli.shared.launcher import module_command
 
     cmd = f"{module_command('observal_cli.hooks.session_push')} --harness cursor"
+    evidence = module_command("observal_cli.hooks.cursor_mcp_evidence")
 
     desired = {
         "version": 1,
         "hooks": {
+            # Keep the older IDE/CLI session triggers; the tested headless CLI
+            # uses sessionEnd. Its collector writes a private heartbeat first,
+            # then invokes the existing acknowledged session-push pipeline.
             "beforeSubmitPrompt": [{"command": cmd, "type": "command"}],
             "stop": [{"command": cmd, "type": "command"}],
+            "sessionStart": [{"command": f"{evidence} --event start", "type": "command"}],
+            "beforeMCPExecution": [{"command": f"{evidence} --event before", "type": "command"}],
+            "afterMCPExecution": [{"command": f"{evidence} --event after", "type": "command"}],
+            "sessionEnd": [{"command": f"{evidence} --event end", "type": "command"}],
         },
     }
 
@@ -1449,12 +1484,18 @@ def _patch_cursor(dry_run: bool) -> bool:
 
     # Check if already patched
     existing_hooks = existing.get("hooks", {})
+    if not isinstance(existing_hooks, dict):
+        raise ValueError("Cursor hooks must be a JSON object")
     needs_update = False
 
-    for event in ("beforeSubmitPrompt", "stop"):
+    for event, desired_entries in desired["hooks"].items():
         entries = existing_hooks.get(event, [])
-        has_observal = any("hooks.session_push --harness cursor" in e.get("command", "") for e in entries)
-        if not has_observal:
+        if not isinstance(entries, list) or not any(
+            isinstance(entry, dict)
+            and entry.get("command") == desired_entries[0]["command"]
+            and entry.get("type") == "command"
+            for entry in entries
+        ):
             needs_update = True
             break
 
@@ -1467,11 +1508,9 @@ def _patch_cursor(dry_run: bool) -> bool:
     for event, desired_entries in desired["hooks"].items():
         current = merged_hooks.get(event, [])
         # Remove old Observal hooks
-        cleaned = [
-            h
-            for h in current
-            if "cursor_session_push" not in h.get("command", "") and "session_push" not in h.get("command", "")
-        ]
+        if not isinstance(current, list):
+            raise ValueError("Cursor hook entries must be a list")
+        cleaned = [entry for entry in current if not _is_managed_cursor_hook(entry)]
         merged_hooks[event] = cleaned + desired_entries
 
     result = {"version": 1, "hooks": merged_hooks}

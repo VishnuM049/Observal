@@ -177,10 +177,12 @@ class CursorAdapter(BaseAdapter):
     ) -> tuple[str, ...]:
         if not final or source.parent_session_id is not None:
             return ()
+        from observal_cli.hooks.cursor_mcp_evidence import source_records
         from observal_cli.sessions.cursor import build_usage_line
 
+        evidence = source_records(source, event, home=home)
         usage = build_usage_line(event)
-        return (usage,) if usage else ()
+        return (*evidence, usage) if usage else evidence
 
     def defer_session_delivery(self) -> bool:
         return True
