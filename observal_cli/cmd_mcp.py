@@ -1691,8 +1691,9 @@ def install(
     scope: str | None = typer.Option(None, "--scope", help="Explicit project or user install scope for --apply"),
     output: OutputMode = typer.Option("table", "--output", "-o", help="Output format: table or json"),
 ):
-    """Generate a snippet, or with --apply configure and track a supported MCP.
+    """Generate a snippet, or track a scoped stdio MCP in Claude Code, Kiro CLI, Codex, or Cursor.
 
+    --apply requires --dir and --scope project|user; a verified install is not proof of an executed call.
     Produces harness-specific configuration that you paste into your editor's
     MCP settings file. Prompts for required environment variables and
     headers interactively (unless --raw or --no-prompt is used).
