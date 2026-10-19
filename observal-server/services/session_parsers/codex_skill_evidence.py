@@ -1,16 +1,18 @@
 # SPDX-FileCopyrightText: 2026 Observal Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Codex 0.163.0 project skill *availability* from native rollout JSONL.
+"""Codex 0.163.0 project skill inventory and native selected-skill provenance.
 
 Codex writes the skills inventory in a developer ``response_item`` as a
 ``## Skills`` block with a ``### Skill roots`` table and an ``### Available
 skills`` list. The inventory names a root and SKILL.md for each entry. Only a
 single, exact project ``<cwd>/.agents/skills/<alias>/SKILL.md`` location can
 be a candidate; the verified layer pin and its file/location fingerprint are
-still required by the shared skill matcher. We do not interpret a user message
-containing ``$name`` or an expanded SKILL.md as a native invocation: pasted
-text can reproduce those records. No prompt, description or path is published.
+still required by the shared skill matcher. Selection is a separate first-party
+``skills.selected_skill_instructions`` content kind, with one tagged, rooted
+SKILL.md expansion linked to a user-text message in the same turn. Pasted
+markup, an ordinary file read or a ``$name`` user message alone never qualifies.
+No prompt, description, instruction body or path is published.
 
 Other Codex versions and missing/ambiguous inventories are unsupported, not
 measured zero. User-scope and parent-workspace skills are not attributed.
@@ -37,6 +39,9 @@ _ROOT = re.compile(r"- `(r[0-9]{1,3})` = `(/[^`\r\n]{1,4096})`\Z")
 _ENTRY = re.compile(
     rf"- (?P<alias>{_ALIAS}): [^\r\n]{{1,4096}} \(file: (?P<root>r[0-9]{{1,3}})/(?P=alias)/SKILL\.md\)\Z"
 )
+_SELECTION = re.compile(
+    rf"<skill>\n<name>(?P<alias>{_ALIAS})</name>\n<path>(?P<path>/[^<>\r\n]{{1,4096}}/SKILL\.md)</path>\n(?P<body>[\s\S]{{0,65536}})</skill>\Z"
+)
 
 
 def _mac_tmp(path: str) -> str:
@@ -61,7 +66,7 @@ def _time(record: dict, row: Mapping[str, object]) -> datetime | None:
 
 
 class CodexSkillEvidenceExtractor:
-    observed_kinds: frozenset = frozenset({"available"})
+    observed_kinds: frozenset = frozenset({"available", "invoked"})
 
     def extract(self, rows: Sequence[Mapping[str, object]]) -> SkillEvidenceExtraction:
         records: list[tuple[int, dict, Mapping[str, object]]] = []
@@ -79,6 +84,8 @@ class CodexSkillEvidenceExtractor:
                 continue
             records.append((offset, record, row))
         records.sort(key=lambda item: item[0])
+        if len({offset for offset, _, _ in records}) != len(records):
+            return SkillEvidenceExtraction("unsupported", (), malformed)
 
         metas = [record.get("payload") for _, record, _ in records if record.get("type") == "session_meta"]
         if len(metas) != 1 or not isinstance(metas[0], dict) or metas[0].get("cli_version") != _TESTED_VERSION:
@@ -160,5 +167,66 @@ class CodexSkillEvidenceExtractor:
         # Duplicated roots/aliases also make absence and scope ambiguous.
         if inventories != 1 or not project_root_seen or ambiguous or any(n != 1 for n in alias_occurrences.values()):
             return SkillEvidenceExtraction("unsupported", (), malformed)
-        evidence = tuple(items[0] for _, items in sorted(candidates.items()))
-        return SkillEvidenceExtraction("supported", evidence, malformed)
+        evidence = [items[0] for _, items in sorted(candidates.items())]
+        prompt_turns: dict[str, int] = {}
+        seen_selections: set[tuple[str, str]] = set()
+        selected: list[SkillEvidence] = []
+        for offset, record, row in records:
+            if record.get("type") != "response_item":
+                continue
+            payload = record.get("payload")
+            if not isinstance(payload, dict) or payload.get("type") != "message" or payload.get("role") != "user":
+                continue
+            metadata = payload.get("internal_chat_message_metadata_passthrough")
+            if not isinstance(metadata, dict):
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            kinds, turn_id = metadata.get("content_item_kinds"), metadata.get("turn_id")
+            if not isinstance(kinds, list) or len(kinds) != 1 or not isinstance(turn_id, str) or not turn_id:
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            kind = kinds[0]
+            if kind == "user.text":
+                if turn_id in prompt_turns:
+                    return SkillEvidenceExtraction("unsupported", (), malformed)
+                prompt_turns[turn_id] = offset
+                continue
+            if kind == "environments.environment_context":
+                continue
+            if kind != "skills.selected_skill_instructions" or prompt_turns.get(turn_id, offset) >= offset:
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            blocks = payload.get("content")
+            if not isinstance(blocks, list) or len(blocks) != 1 or not isinstance(blocks[0], dict):
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            text = blocks[0].get("text")
+            if blocks[0].get("type") != "input_text" or not isinstance(text, str):
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            match = _SELECTION.fullmatch(text)
+            if match is None or "<skill>" in match.group("body"):
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            alias, path = match.group("alias", "path")
+            if (
+                (turn_id, alias) in seen_selections
+                or posixpath.normpath(path) != path
+                or _mac_tmp(path) != f"{project_skills}/{alias}/SKILL.md"
+                or len(candidates.get(alias, ())) != 1
+            ):
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            time = _time(record, row)
+            if time is None:
+                return SkillEvidenceExtraction("unsupported", (), malformed)
+            seen_selections.add((turn_id, alias))
+            selected.append(
+                SkillEvidence(
+                    "invoked",
+                    "project",
+                    alias,
+                    offset,
+                    f"skill-invoked:project:{alias}",
+                    time,
+                    location_sha256=hashlib.sha256(path.encode()).hexdigest(),
+                )
+            )
+        # Without a typed user turn, an old or truncated transcript cannot
+        # prove the absence of a selected-skill message (no zero denominator).
+        if not prompt_turns:
+            return SkillEvidenceExtraction("unsupported", (), malformed)
+        return SkillEvidenceExtraction("supported", tuple((*evidence, *selected)), malformed)

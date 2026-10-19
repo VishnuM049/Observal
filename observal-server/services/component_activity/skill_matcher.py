@@ -22,9 +22,9 @@ if TYPE_CHECKING:
 
     from services.session_parsers.skill_evidence import SkillEvidence
 
-# 3: Codex's version-scoped, fail-closed native skill inventory joins availability facts.
-# Bump the shared publication key so earlier skill projections cannot masquerade as current.
-SKILL_MATCHER_VERSION = 3
+# 4: Codex's native, version-scoped selected-skill metadata adds an invocation fact.
+# Earlier availability-only publications must be replayed, never treated as zero use.
+SKILL_MATCHER_VERSION = 4
 
 
 @dataclass(frozen=True)

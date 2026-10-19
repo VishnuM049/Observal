@@ -18,6 +18,7 @@ from services.component_activity.skill_matcher import match_skill_evidence
 from services.session_parsers.skill_evidence import extract_skill_evidence, kind_recorded
 
 FIXTURE = Path(__file__).parent / "fixtures/component_insights/codex/skill_available.jsonl"
+SELECTED = Path(__file__).parent / "fixtures/component_insights/codex/skill_selected.jsonl"
 ALIAS = "matrix-probe-skill"
 
 
@@ -25,6 +26,13 @@ def rows():
     return [
         {"is_source_record": 1, "line_offset": index, "raw_line": raw, "line_hash": f"hash-{index}"}
         for index, raw in enumerate(FIXTURE.read_text().splitlines())
+    ]
+
+
+def selected_rows():
+    return [
+        {"is_source_record": 1, "line_offset": index, "raw_line": raw, "line_hash": f"selected-hash-{index}"}
+        for index, raw in enumerate(SELECTED.read_text().splitlines())
     ]
 
 
@@ -36,7 +44,7 @@ def changed(rows_, index, change):
     return items
 
 
-def test_native_inventory_is_availability_only_and_never_uses_user_prompt():
+def test_native_inventory_availability_does_not_infer_invocation_from_user_prompt():
     extracted = extract_skill_evidence("codex", rows())
     assert extracted.status == "supported"
     assert extracted.malformed_source_records == 0
@@ -50,8 +58,97 @@ def test_native_inventory_is_availability_only_and_never_uses_user_prompt():
     assert "tmp" not in str(fact)
     assert kind_recorded("codex", "available")
     assert not kind_recorded("codex", "load")
-    assert not kind_recorded("codex", "invoked")
+    assert kind_recorded("codex", "invoked")
     assert extract_skill_evidence("kiro", rows()).status == "unsupported"
+
+
+def test_native_selected_skill_has_tagged_project_origin_not_a_file_read():
+    result = extract_skill_evidence("codex", selected_rows())
+    assert result.status == "supported"
+    assert [(e.kind, e.scope, e.alias, e.source_line_offset) for e in result.evidence] == [
+        ("available", "project", ALIAS, 1),
+        ("invoked", "project", ALIAS, 3),
+    ]
+    assert result.evidence[1].location_sha256 == result.evidence[0].location_sha256
+    assert "SKILL.md" not in str(result.evidence[1])
+
+
+def test_pasted_expansion_and_manual_file_read_do_not_select_a_skill():
+    pasted = changed(
+        rows(),
+        2,
+        lambda record: record["payload"]["content"][0].update(text="<skill><name>matrix-probe-skill</name></skill>"),
+    )
+    assert [e.kind for e in extract_skill_evidence("codex", pasted).evidence] == ["available"]
+    manual = changed(
+        rows(),
+        2,
+        lambda record: record["payload"]["content"][0].update(text="cat .agents/skills/matrix-probe-skill/SKILL.md"),
+    )
+    assert [e.kind for e in extract_skill_evidence("codex", manual).evidence] == ["available"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda r: r["payload"].pop("internal_chat_message_metadata_passthrough"),
+        lambda r: r["payload"]["internal_chat_message_metadata_passthrough"].update(content_item_kinds=["user.text"]),
+        lambda r: r["payload"]["internal_chat_message_metadata_passthrough"].update(turn_id="other-turn"),
+        lambda r: r["payload"]["internal_chat_message_metadata_passthrough"].update(
+            content_item_kinds=["skills.selected_skill_instructions", "user.text"]
+        ),
+        lambda r: r["payload"]["content"][0].update(
+            text=r["payload"]["content"][0]["text"].replace("/private/tmp/observal-codex-proof", "/private/tmp/other")
+        ),
+        lambda r: r["payload"]["content"][0].update(
+            text=r["payload"]["content"][0]["text"].replace("<name>matrix-probe-skill</name>", "<name>other</name>")
+        ),
+        lambda r: r["payload"]["content"][0].update(
+            text=r["payload"]["content"][0]["text"].replace("<skill>", "<skill>\n<skill>")
+        ),
+        lambda r: r.update(timestamp="invalid"),
+    ],
+)
+def test_bad_or_spoofed_selected_source_withholds_whole_session(mutation):
+    assert extract_skill_evidence("codex", changed(selected_rows(), 3, mutation)).status == "unsupported"
+
+
+def test_two_distinct_selected_skills_in_one_turn_are_separate_facts():
+    other = "matrix-other-skill"
+    items = selected_rows()
+    listing = json.loads(items[1]["raw_line"])
+    listing["payload"]["content"][0]["text"] += f"- {other}: Inert (file: r0/{other}/SKILL.md)\n"
+    items[1]["raw_line"] = json.dumps(listing)
+    first = json.loads(items[3]["raw_line"])
+    first["payload"]["id"] = "msg-second-selected"
+    first["payload"]["content"][0]["text"] = first["payload"]["content"][0]["text"].replace(ALIAS, other)
+    items.append({"is_source_record": 1, "line_offset": 5, "raw_line": json.dumps(first), "line_hash": "second-hash"})
+    result = extract_skill_evidence("codex", items)
+    assert result.status == "supported"
+    assert [(e.kind, e.alias) for e in result.evidence] == [
+        ("available", other),
+        ("available", ALIAS),
+        ("invoked", ALIAS),
+        ("invoked", other),
+    ]
+
+
+def test_duplicate_or_reordered_selected_source_is_unsupported():
+    original = selected_rows()
+    duplicated = [*original, dict(original[3], line_offset=5)]
+    assert extract_skill_evidence("codex", duplicated).status == "unsupported"
+    assert extract_skill_evidence("codex", [*original, original[3]]).status == "unsupported"
+    before_prompt = [dict(original[3], line_offset=2), dict(original[2], line_offset=3), *original[:2], original[4]]
+    assert extract_skill_evidence("codex", before_prompt).status == "unsupported"
+
+
+def test_missing_native_user_kind_is_not_a_zero_use_session():
+    assert (
+        extract_skill_evidence(
+            "codex", changed(rows(), 2, lambda r: r["payload"].pop("internal_chat_message_metadata_passthrough"))
+        ).status
+        == "unsupported"
+    )
 
 
 def test_malformed_missing_or_unverified_version_is_not_zero():
@@ -120,6 +217,43 @@ def test_other_roots_or_ambiguous_aliases_never_match():
             ),
         )
         assert extract_skill_evidence("codex", malformed).status == "unsupported"
+
+
+def test_selected_skill_matches_only_contemporaneous_verified_location():
+    facts = extract_skill_evidence("codex", selected_rows()).evidence
+    assert len(facts) == 2
+    selected = facts[1]
+    verified = {
+        "component_id": "controlled-component",
+        "component_version_id": "controlled-version",
+        "local_name": ALIAS,
+        "scope": "project",
+        "location_sha256": selected.location_sha256,
+        "identity_status": "resolved",
+        "verification_status": "verified",
+    }
+    result = match_skill_evidence((selected,), {"same-layer": [verified]}, {3: "same-layer"})
+    assert result.unmatched_count == 0
+    assert len(result.rows) == 1
+    assert (result.rows[0]["evidence_kind"], result.rows[0]["attribution_method"]) == (
+        "skill_invoked",
+        "verified_skill_install",
+    )
+    assert "path" not in result.rows[0]
+    for changed_candidate in (
+        verified | {"verification_status": "drifted"},
+        verified | {"verification_status": "unverified"},
+        verified | {"scope": "user"},
+        verified | {"location_sha256": "0" * 64},
+    ):
+        unmatched = match_skill_evidence((selected,), {"same-layer": [changed_candidate]}, {3: "same-layer"})
+        assert unmatched.rows == () and unmatched.unmatched_count == 1
+    missing = match_skill_evidence((selected,), {"other-layer": [verified]}, {3: "same-layer"})
+    assert missing.rows == () and missing.unmatched_count == 1
+    collision = match_skill_evidence(
+        (selected,), {"same-layer": [verified, verified | {"component_id": "other"}]}, {3: "same-layer"}
+    )
+    assert collision.rows == () and collision.collision_count == 1
 
 
 def test_verified_project_file_location_and_shadow_gate(tmp_path, monkeypatch):
@@ -200,14 +334,14 @@ def test_matching_requires_verified_identity_exact_location_and_snapshot():
 
 
 @pytest.mark.asyncio
-async def test_codex_only_cohort_reports_offered_but_unknown_use(monkeypatch):
+async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monkeypatch):
     async def warehouse(sql, _params):
         if sql == skill_queries._SKILL_SUMMARY:
             return [
                 {
                     "supported_present_sessions": 1,
                     "projection_complete_sessions": 1,
-                    "usage_measurable_sessions": 0,
+                    "usage_measurable_sessions": 1,
                     "available_sessions": 1,
                     "loaded_sessions": 0,
                     "total_confirmed_loads": 0,
@@ -239,21 +373,21 @@ async def test_codex_only_cohort_reports_offered_but_unknown_use(monkeypatch):
     result = await skill_queries.skill_activity_summary("default", listing, None, (now - timedelta(days=1), now))
     assert result["available_sessions"] == 1
     assert (result["loaded_sessions"], result["confirmed_loads"], result["load_attempts"]) == (None, None, None)
-    assert (result["invoked_sessions"], result["invocations"]) == (None, None)
-    assert result["coverage"].usage_rate_denominator_sessions == 0
-    assert result["coverage"].attribution_state == "attribution_not_possible"
-    assert result["coverage"].usage_rate is None
-    assert "availability_only_harness_sessions" in result["coverage"].reasons
+    assert (result["invoked_sessions"], result["invocations"]) == (0, 0)
+    assert result["coverage"].usage_rate_denominator_sessions == 1
+    assert result["coverage"].attribution_state == "no_observed_skill_use"
+    assert result["coverage"].usage_rate == 0
+    assert "availability_only_harness_sessions" not in result["coverage"].reasons
     assert any(x.startswith("loads_not_recorded") for x in result["coverage"].limitations)
     params = skill_queries._params("default", listing, None, (now - timedelta(days=1), now))
-    assert "codex" in params["param_supported"] and "codex" not in params["param_use_capable"]
+    assert "codex" in params["param_supported"] and "codex" in params["param_use_capable"]
     assert "has({use_capable:Array(String)}, harness)" in skill_queries._SKILL_SUMMARY
 
     from services.insights import component_report
 
     narrative = component_report.generate_skill_sections(result, result["coverage"].model_dump(mode="json"))
-    assert "skill was offered" in narrative["summary"]
-    assert "No use conclusion can be drawn" in narrative["summary"]
+    assert "No confirmed load or invocation" in narrative["summary"]
+    assert "does not prove the skill was never used" in narrative["summary"]
 
 
 @pytest.mark.asyncio

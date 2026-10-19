@@ -115,10 +115,16 @@ def generate_skill_sections(summary: dict, coverage: dict) -> dict:
     """Plain-language conclusion and evidence breakdown, from counts alone."""
     state = coverage["attribution_state"]
     if state == "observed":
-        conclusion = (
-            "The skill's instructions entered context in processed present sessions "
-            "(a confirmed load or an invocation). This does not show the skill was followed or helped."
-        )
+        if summary["invocations"] and not summary["confirmed_loads"]:
+            conclusion = (
+                "An explicit skill invocation was recorded in processed present sessions. "
+                "This does not establish a separately confirmed skill load or show the skill was followed or helped."
+            )
+        else:
+            conclusion = (
+                "The skill's instructions entered context in processed present sessions "
+                "(a confirmed load or an invocation). This does not show the skill was followed or helped."
+            )
     elif state == "no_observed_skill_use":
         conclusion = (
             "No confirmed load or invocation in processed present sessions; this does not prove the skill "

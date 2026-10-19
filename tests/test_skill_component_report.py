@@ -77,6 +77,19 @@ async def test_skill_report_states_what_the_evidence_does_and_does_not_show(monk
 
 
 @pytest.mark.asyncio
+async def test_invocation_only_skill_report_does_not_claim_a_confirmed_load(monkeypatch):
+    summary = _summary(observed=1, complete=2)
+    summary.update(loaded_sessions=None, confirmed_loads=None, invoked_sessions=1, invocations=1)
+    monkeypatch.setattr(skill_queries, "skill_activity_summary", AsyncMock(return_value=summary))
+
+    content = await component_report.generate_component_content(_report())
+    assert "An explicit skill invocation was recorded" in content["narrative"]["summary"]
+    assert "does not establish a separately confirmed skill load" in content["narrative"]["summary"]
+    assert content["metrics"]["confirmed_loads"] is None
+    assert content["metrics"]["invocations"] == 1
+
+
+@pytest.mark.asyncio
 async def test_unsupported_component_types_are_rejected():
     report = _report()
     report.component_type = "prompt"
