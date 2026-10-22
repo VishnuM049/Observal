@@ -89,6 +89,25 @@ async def test_invocation_only_skill_report_does_not_claim_a_confirmed_load(monk
     assert content["metrics"]["invocations"] == 1
 
 
+@pytest.mark.parametrize("observed", [0, 1])
+def test_skill_report_does_not_call_unmeasured_scopes_zero(observed):
+    summary = _summary(observed=observed, complete=3)
+    summary["coverage"] = build_skill_coverage(
+        {"present_sessions": 3},
+        {
+            "projection_complete_sessions": 3,
+            "usage_measurable_sessions": 1,
+            "scope_unmeasurable_sessions": 2,
+            "observed_sessions": observed,
+        },
+        515,
+    )
+    narrative = component_report.generate_skill_sections(summary, summary["coverage"].model_dump(mode="json"))
+    assert "other installed scopes remain unknown" in narrative["summary"].lower()
+    if not observed:
+        assert "measured skill-scope sessions" in narrative["summary"]
+
+
 @pytest.mark.asyncio
 async def test_unsupported_component_types_are_rejected():
     report = _report()

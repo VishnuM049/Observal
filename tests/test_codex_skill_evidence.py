@@ -59,6 +59,11 @@ def test_native_inventory_availability_does_not_infer_invocation_from_user_promp
     assert kind_recorded("codex", "available")
     assert not kind_recorded("codex", "load")
     assert kind_recorded("codex", "invoked")
+    assert kind_recorded("codex", "invoked", "project")
+    assert not kind_recorded("codex", "invoked", "user")
+    assert not kind_recorded("codex", "available", "user")
+    assert kind_recorded("claude-code", "invoked", "user")
+    assert kind_recorded("pi", "available", "user")
     assert extract_skill_evidence("kiro", rows()).status == "unsupported"
 
 
@@ -342,6 +347,10 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
                     "supported_present_sessions": 1,
                     "projection_complete_sessions": 1,
                     "usage_measurable_sessions": 1,
+                    "available_scope_present_sessions": 1,
+                    "invoked_scope_present_sessions": 1,
+                    "available_measurable_sessions": 1,
+                    "invoked_measurable_sessions": 1,
                     "available_sessions": 1,
                     "loaded_sessions": 0,
                     "total_confirmed_loads": 0,
@@ -381,13 +390,164 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
     assert any(x.startswith("loads_not_recorded") for x in result["coverage"].limitations)
     params = skill_queries._params("default", listing, None, (now - timedelta(days=1), now))
     assert "codex" in params["param_supported"] and "codex" in params["param_use_capable"]
+    assert "codex" in params["param_project_only"]
+    assert "claude-code" not in params["param_project_only"] and "pi" not in params["param_project_only"]
     assert "has({use_capable:Array(String)}, harness)" in skill_queries._SKILL_SUMMARY
+    assert "AND scope_measurable) AS usage_measurable_sessions" in skill_queries._SKILL_SUMMARY
 
     from services.insights import component_report
 
     narrative = component_report.generate_skill_sections(result, result["coverage"].model_dump(mode="json"))
     assert "No confirmed load or invocation" in narrative["summary"]
     assert "does not prove the skill was never used" in narrative["summary"]
+
+
+@pytest.mark.asyncio
+async def test_user_only_codex_skill_keeps_use_and_availability_unknown(monkeypatch):
+    """A project inventory can coexist with a verified *user* pin; it proves no user-skill zero."""
+
+    async def warehouse(sql, _params):
+        if sql == skill_queries._SKILL_SUMMARY:
+            return [
+                {
+                    "supported_present_sessions": 1,
+                    "projection_complete_sessions": 1,
+                    "scope_unmeasurable_sessions": 1,
+                    "usage_measurable_sessions": 0,
+                    "available_measurable_sessions": 0,
+                    "invoked_measurable_sessions": 0,
+                }
+            ]
+        if sql == skill_queries._HARNESSES:
+            return [{"harness": "codex", "sessions": 1}]
+        return [{}]
+
+    monkeypatch.setattr(skill_queries, "_rows", warehouse)
+    monkeypatch.setattr(skill_queries, "presence_coverage", AsyncMock(return_value={"present_sessions": 1}))
+    monkeypatch.setattr(skill_queries, "presence_version_distribution", AsyncMock(return_value={}))
+    now = datetime.now(UTC)
+    summary = await skill_queries.skill_activity_summary(
+        "default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now)
+    )
+    assert (summary["available_sessions"], summary["invoked_sessions"], summary["invocations"]) == (
+        None,
+        None,
+        None,
+    )
+    coverage = summary["coverage"]
+    assert coverage.projection.projection_complete_sessions == 1
+    assert coverage.usage_rate_denominator_sessions == 0 and coverage.usage_rate is None
+    assert coverage.attribution_state == "attribution_not_possible"
+    assert "skill_scope_not_recorded" in coverage.reasons
+    assert "availability_only_harness_sessions" not in coverage.reasons
+    assert not any("not_recorded_on_some_scopes" in reason for reason in coverage.reasons)
+
+
+@pytest.mark.asyncio
+async def test_codex_mixed_project_and_user_scope_excludes_unmeasured_siblings(monkeypatch):
+    async def warehouse(sql, _params):
+        if sql == skill_queries._SKILL_SUMMARY:
+            return [
+                {
+                    "supported_present_sessions": 3,
+                    "projection_complete_sessions": 3,
+                    "scope_unmeasurable_sessions": 2,
+                    "usage_measurable_sessions": 1,
+                    "available_scope_present_sessions": 1,
+                    "invoked_scope_present_sessions": 1,
+                    "available_measurable_sessions": 1,
+                    "invoked_measurable_sessions": 1,
+                    "available_sessions": 1,
+                }
+            ]
+        if sql == skill_queries._HARNESSES:
+            return [{"harness": "codex", "sessions": 3}]
+        return [{}]
+
+    monkeypatch.setattr(skill_queries, "_rows", warehouse)
+    monkeypatch.setattr(skill_queries, "presence_coverage", AsyncMock(return_value={"present_sessions": 3}))
+    monkeypatch.setattr(skill_queries, "presence_version_distribution", AsyncMock(return_value={}))
+    now = datetime.now(UTC)
+    summary = await skill_queries.skill_activity_summary(
+        "default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now)
+    )
+    assert (summary["available_sessions"], summary["invoked_sessions"], summary["invocations"]) == (1, 0, 0)
+    coverage = summary["coverage"]
+    assert coverage.usage_rate_denominator_sessions == 1 and coverage.usage_rate == 0
+    assert coverage.projection.projection_complete_sessions == 3
+    assert "skill_scope_not_recorded" in coverage.reasons
+    assert "invoked_not_recorded_on_some_scopes" in coverage.reasons
+    assert "available_not_recorded_on_some_scopes" in coverage.reasons
+
+
+@pytest.mark.asyncio
+async def test_pending_project_skill_does_not_make_complete_user_skill_a_zero(monkeypatch):
+    async def warehouse(sql, _params):
+        if sql == skill_queries._SKILL_SUMMARY:
+            return [
+                {
+                    "supported_present_sessions": 2,
+                    "projection_complete_sessions": 1,
+                    "projection_pending_sessions": 1,
+                    "scope_unmeasurable_sessions": 1,
+                    "usage_measurable_sessions": 0,
+                    "available_scope_present_sessions": 1,
+                    "invoked_scope_present_sessions": 1,
+                }
+            ]
+        if sql == skill_queries._HARNESSES:
+            return [{"harness": "codex", "sessions": 2}]
+        return [{}]
+
+    monkeypatch.setattr(skill_queries, "_rows", warehouse)
+    monkeypatch.setattr(skill_queries, "presence_coverage", AsyncMock(return_value={"present_sessions": 2}))
+    monkeypatch.setattr(skill_queries, "presence_version_distribution", AsyncMock(return_value={}))
+    now = datetime.now(UTC)
+    summary = await skill_queries.skill_activity_summary(
+        "default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now)
+    )
+    assert (summary["available_sessions"], summary["invocations"]) == (None, None)
+    coverage = summary["coverage"]
+    assert coverage.attribution_state == "attribution_not_possible"
+    assert coverage.usage_rate_denominator_sessions == 0
+    assert "projection_pending_sessions" in coverage.reasons and "skill_scope_not_recorded" in coverage.reasons
+    assert not any(item.startswith("invocations_not_recorded") for item in coverage.limitations)
+
+
+@pytest.mark.asyncio
+async def test_codex_scope_gates_each_session_row(monkeypatch):
+    now = datetime.now(UTC)
+
+    async def warehouse(_sql, _params):
+        return [
+            {
+                "user_id": "u",
+                "harness": "codex",
+                "session_id": name,
+                "last_event_time": now.isoformat(),
+                "projection_state": "complete",
+                "source_state": "complete",
+                "scope_measurable": scope,
+                "available_facts": 0,
+                "invocations": 0,
+            }
+            for name, scope in (("project", 1), ("user", 0), ("mixed", 0))
+        ]
+
+    monkeypatch.setattr(skill_queries, "_rows", warehouse)
+    result, _ = await skill_queries.skill_activity_sessions(
+        "default",
+        "11111111-1111-4111-8111-111111111111",
+        None,
+        (now - timedelta(days=1), now),
+        limit=10,
+        cursor=None,
+        cursor_scope=("default", "u", "skill", "id", "", "1"),
+    )
+    by_id = {session["session_id"]: session for session in result}
+    assert (by_id["project"]["available"], by_id["project"]["invocations"]) == (False, 0)
+    for name in ("user", "mixed"):
+        assert (by_id[name]["available"], by_id[name]["invocations"]) == (None, None)
 
 
 @pytest.mark.asyncio

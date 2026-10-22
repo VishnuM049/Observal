@@ -125,11 +125,19 @@ def generate_skill_sections(summary: dict, coverage: dict) -> dict:
                 "The skill's instructions entered context in processed present sessions "
                 "(a confirmed load or an invocation). This does not show the skill was followed or helped."
             )
+        if "skill_scope_not_recorded" in coverage["reasons"]:
+            conclusion += " Other installed scopes remain unknown."
     elif state == "no_observed_skill_use":
-        conclusion = (
-            "No confirmed load or invocation in processed present sessions; this does not prove the skill "
-            "was never used."
-        )
+        if "skill_scope_not_recorded" in coverage["reasons"]:
+            conclusion = (
+                "No confirmed load or invocation in the measured skill-scope sessions; other installed scopes "
+                "remain unknown. This does not prove the skill was never used."
+            )
+        else:
+            conclusion = (
+                "No confirmed load or invocation in processed present sessions; this does not prove the skill "
+                "was never used."
+            )
     elif summary["available_sessions"] and coverage["projection"]["projection_complete_sessions"]:
         conclusion = (
             "The skill was offered in processed, verified-present sessions, but those sessions do not establish "

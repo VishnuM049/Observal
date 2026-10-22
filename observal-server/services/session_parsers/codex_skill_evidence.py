@@ -67,6 +67,7 @@ def _time(record: dict, row: Mapping[str, object]) -> datetime | None:
 
 class CodexSkillEvidenceExtractor:
     observed_kinds: frozenset = frozenset({"available", "invoked"})
+    observed_scopes: frozenset = frozenset({"project"})
 
     def extract(self, rows: Sequence[Mapping[str, object]]) -> SkillEvidenceExtraction:
         records: list[tuple[int, dict, Mapping[str, object]]] = []
