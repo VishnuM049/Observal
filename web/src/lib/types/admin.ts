@@ -195,6 +195,8 @@ export interface SkillInsightMetrics {
 	/** Null when no harness in the cohort records a distinguishable invocation. */
 	invoked_sessions: number | null;
 	invocations: number | null;
+	/** Native Codex project-skill selection, also counted as invocation. Older reports omit it. */
+	instructions_supplied_inferred_sessions?: number | null;
 	harness_distribution: Record<string, number>;
 	version_distribution: Record<string, number>;
 }

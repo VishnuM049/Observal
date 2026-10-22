@@ -69,6 +69,12 @@ function SkillReport({ report }: { report: InsightReport }) {
           { label: "Invocations", value: <SkillCount value={metrics?.invoked_sessions} measured={availabilityMeasured} partial={coverage?.reasons.includes("invoked_not_recorded_on_some_harnesses")} /> },
           { label: "Offered", value: <SkillCount value={metrics?.available_sessions} measured={availabilityMeasured} partial={coverage?.reasons.includes("available_not_recorded_on_some_harnesses")} /> },
         ]}>
+          {metrics?.instructions_supplied_inferred_sessions != null && (
+            <p className="max-w-[70ch] text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Instructions supplied (inferred): {metrics.instructions_supplied_inferred_sessions} {metrics.instructions_supplied_inferred_sessions === 1 ? "session" : "sessions"}.</span>{" "}
+              Native Codex project-skill selections only. These are the same invocations, not additional use or confirmed loads; manual file reads are not counted.
+            </p>
+          )}
           {measured && !!metrics?.load_attempts && <p className="text-sm text-muted-foreground">{metrics.load_attempts} load {metrics.load_attempts === 1 ? "attempt" : "attempts"} failed or had no confirmed result, and {metrics.load_attempts === 1 ? "is" : "are"} not counted as {metrics.load_attempts === 1 ? "a load" : "loads"}.</p>}
           {notRecorded.length > 0 && <p className="text-sm text-muted-foreground">The harnesses in this cohort do not record {notRecorded.join(" or ")}, so those counts are unknown rather than zero.</p>}
           {!measured && <p>{availabilityMeasured ? "Being offered does not establish a skill load or an invocation." : "Skill evidence is unavailable for this period; missing measurements do not imply no use."}</p>}

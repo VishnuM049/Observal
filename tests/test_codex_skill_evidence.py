@@ -15,7 +15,11 @@ from observal_cli.harness.codex import CodexAdapter
 from observal_cli.layer import _skill_status, build_layer_manifest, skill_location_sha256, skill_verification_entry
 from services.component_activity import skill_queries
 from services.component_activity.skill_matcher import match_skill_evidence
-from services.session_parsers.skill_evidence import extract_skill_evidence, kind_recorded
+from services.session_parsers.skill_evidence import (
+    extract_skill_evidence,
+    kind_recorded,
+    selection_supplies_instructions,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures/component_insights/codex/skill_available.jsonl"
 SELECTED = Path(__file__).parent / "fixtures/component_insights/codex/skill_selected.jsonl"
@@ -64,6 +68,8 @@ def test_native_inventory_availability_does_not_infer_invocation_from_user_promp
     assert not kind_recorded("codex", "available", "user")
     assert kind_recorded("claude-code", "invoked", "user")
     assert kind_recorded("pi", "available", "user")
+    assert selection_supplies_instructions("codex")
+    assert not any(selection_supplies_instructions(h) for h in ("claude-code", "pi", "kiro"))
     assert extract_skill_evidence("kiro", rows()).status == "unsupported"
 
 
@@ -351,6 +357,7 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
                     "invoked_scope_present_sessions": 1,
                     "available_measurable_sessions": 1,
                     "invoked_measurable_sessions": 1,
+                    "inferred_supply_measurable_sessions": 1,
                     "available_sessions": 1,
                     "loaded_sessions": 0,
                     "total_confirmed_loads": 0,
@@ -383,6 +390,7 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
     assert result["available_sessions"] == 1
     assert (result["loaded_sessions"], result["confirmed_loads"], result["load_attempts"]) == (None, None, None)
     assert (result["invoked_sessions"], result["invocations"]) == (0, 0)
+    assert result["instructions_supplied_inferred_sessions"] == 0
     assert result["coverage"].usage_rate_denominator_sessions == 1
     assert result["coverage"].attribution_state == "no_observed_skill_use"
     assert result["coverage"].usage_rate == 0
@@ -391,6 +399,8 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
     params = skill_queries._params("default", listing, None, (now - timedelta(days=1), now))
     assert "codex" in params["param_supported"] and "codex" in params["param_use_capable"]
     assert "codex" in params["param_project_only"]
+    assert "codex" in params["param_supply_capable"]
+    assert "claude-code" not in params["param_supply_capable"] and "pi" not in params["param_supply_capable"]
     assert "claude-code" not in params["param_project_only"] and "pi" not in params["param_project_only"]
     assert "has({use_capable:Array(String)}, harness)" in skill_queries._SKILL_SUMMARY
     assert "AND scope_measurable) AS usage_measurable_sessions" in skill_queries._SKILL_SUMMARY
@@ -400,6 +410,44 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
     narrative = component_report.generate_skill_sections(result, result["coverage"].model_dump(mode="json"))
     assert "No confirmed load or invocation" in narrative["summary"]
     assert "does not prove the skill was never used" in narrative["summary"]
+
+
+@pytest.mark.asyncio
+async def test_inferred_supply_is_subset_of_attributed_native_selection_not_a_second_use(monkeypatch):
+    async def warehouse(sql, params):
+        if sql == skill_queries._SKILL_SUMMARY:
+            assert "codex" in params["param_supply_capable"]
+            return [
+                {
+                    "supported_present_sessions": 3,
+                    "projection_complete_sessions": 3,
+                    "usage_measurable_sessions": 3,
+                    "invoked_scope_present_sessions": 3,
+                    "invoked_measurable_sessions": 3,
+                    "inferred_supply_measurable_sessions": 2,
+                    "invoked_sessions": 2,
+                    "total_invocations": 3,
+                    "instructions_supplied_inferred_sessions": 1,
+                    "observed_sessions": 2,
+                }
+            ]
+        if sql == skill_queries._HARNESSES:
+            return [{"harness": "codex", "sessions": 2}, {"harness": "claude-code", "sessions": 1}]
+        return [{}]
+
+    monkeypatch.setattr(skill_queries, "_rows", warehouse)
+    monkeypatch.setattr(skill_queries, "presence_coverage", AsyncMock(return_value={"present_sessions": 3}))
+    monkeypatch.setattr(skill_queries, "presence_version_distribution", AsyncMock(return_value={}))
+    now = datetime.now(UTC)
+    summary = await skill_queries.skill_activity_summary(
+        "default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now)
+    )
+    assert (summary["invoked_sessions"], summary["invocations"]) == (2, 3)
+    assert summary["instructions_supplied_inferred_sessions"] == 1
+    assert summary["coverage"].observed_sessions == 2
+    assert summary["confirmed_loads"] is None
+    assert "has({supply_capable:Array(String)}, harness) AND invocations > 0" in skill_queries._SKILL_SUMMARY
+    assert "AND scope_measurable) AS inferred_supply_measurable_sessions" in skill_queries._SKILL_SUMMARY
 
 
 @pytest.mark.asyncio
@@ -414,6 +462,7 @@ async def test_user_only_codex_skill_keeps_use_and_availability_unknown(monkeypa
                     "projection_complete_sessions": 1,
                     "scope_unmeasurable_sessions": 1,
                     "usage_measurable_sessions": 0,
+                    "inferred_supply_measurable_sessions": 0,
                     "available_measurable_sessions": 0,
                     "invoked_measurable_sessions": 0,
                 }
@@ -434,6 +483,7 @@ async def test_user_only_codex_skill_keeps_use_and_availability_unknown(monkeypa
         None,
         None,
     )
+    assert summary["instructions_supplied_inferred_sessions"] is None
     coverage = summary["coverage"]
     assert coverage.projection.projection_complete_sessions == 1
     assert coverage.usage_rate_denominator_sessions == 0 and coverage.usage_rate is None
@@ -457,6 +507,7 @@ async def test_codex_mixed_project_and_user_scope_excludes_unmeasured_siblings(m
                     "invoked_scope_present_sessions": 1,
                     "available_measurable_sessions": 1,
                     "invoked_measurable_sessions": 1,
+                    "inferred_supply_measurable_sessions": 1,
                     "available_sessions": 1,
                 }
             ]
@@ -472,6 +523,7 @@ async def test_codex_mixed_project_and_user_scope_excludes_unmeasured_siblings(m
         "default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now)
     )
     assert (summary["available_sessions"], summary["invoked_sessions"], summary["invocations"]) == (1, 0, 0)
+    assert summary["instructions_supplied_inferred_sessions"] == 0
     coverage = summary["coverage"]
     assert coverage.usage_rate_denominator_sessions == 1 and coverage.usage_rate == 0
     assert coverage.projection.projection_complete_sessions == 3
@@ -507,6 +559,7 @@ async def test_pending_project_skill_does_not_make_complete_user_skill_a_zero(mo
         "default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now)
     )
     assert (summary["available_sessions"], summary["invocations"]) == (None, None)
+    assert summary["instructions_supplied_inferred_sessions"] is None
     coverage = summary["coverage"]
     assert coverage.attribution_state == "attribution_not_possible"
     assert coverage.usage_rate_denominator_sessions == 0
@@ -575,6 +628,7 @@ async def test_unprojected_codex_availability_is_unknown_not_zero(monkeypatch):
             "load_attempts",
             "invoked_sessions",
             "invocations",
+            "instructions_supplied_inferred_sessions",
         )
     )
     assert summary["coverage"].attribution_state == "attribution_not_possible"

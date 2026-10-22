@@ -221,6 +221,7 @@ def _skill_summary(state: str = "observed") -> dict:
         "load_attempts": 1,
         "invoked_sessions": 0,
         "invocations": 0,
+        "instructions_supplied_inferred_sessions": None,
         "harness_distribution": {"pi": 2},
         "version_distribution": {},
         "activation_actions": {"context_sessions": 0, "next_session_sessions": 0, "scope": "component"},
@@ -241,6 +242,7 @@ def test_skill_reads_skill_evidence_never_mcp_fields(api, monkeypatch):
     body = response.json()
     assert (body["loaded_sessions"], body["confirmed_loads"], body["load_attempts"]) == (1, 1, 1)
     assert (body["invoked_sessions"], body["invocations"]) == (None, None), "unknown, not zero"
+    assert body["instructions_supplied_inferred_sessions"] is None
     for mcp_only in ("observed_calls", "result_states"):
         assert mcp_only not in body
     assert "calls" not in body["coverage"] and "evidence" in body["coverage"]

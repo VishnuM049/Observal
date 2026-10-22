@@ -47,7 +47,7 @@ from services.layer_components.queries import (
     presence_params,
     presence_version_distribution,
 )
-from services.session_parsers.skill_evidence import kind_recorded
+from services.session_parsers.skill_evidence import kind_recorded, selection_supplies_instructions
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -143,6 +143,8 @@ _SKILL_SUMMARY = (
                    AND scope_measurable) AS load_measurable_sessions,
            countIf(projection_state = 'complete' AND has({invoked_capable:Array(String)}, harness)
                    AND scope_measurable) AS invoked_measurable_sessions,
+           countIf(projection_state = 'complete' AND has({supply_capable:Array(String)}, harness)
+                   AND scope_measurable) AS inferred_supply_measurable_sessions,
            countIf(projection_state = 'pending') AS projection_pending_sessions,
            countIf(projection_state = 'failed') AS projection_failed_sessions,
            countIf(projection_state = 'stale') AS projection_stale_sessions,
@@ -164,6 +166,11 @@ _SKILL_SUMMARY = (
            countIf(projection_state = 'complete' AND scope_measurable AND invocations > 0)
                AS invoked_sessions,
            sumIf(invocations, projection_state = 'complete' AND scope_measurable) AS total_invocations,
+           -- The same attributed native selected-skill facts as invocations,
+           -- restricted to extractors whose selection includes instructions.
+           countIf(projection_state = 'complete' AND scope_measurable
+                   AND has({supply_capable:Array(String)}, harness) AND invocations > 0)
+               AS instructions_supplied_inferred_sessions,
            countIf(projection_state = 'complete' AND scope_measurable
                    AND (confirmed_loads > 0 OR invocations > 0)) AS observed_sessions
     FROM ("""
@@ -194,6 +201,9 @@ def _params(
                 for name in skill_supported_harnesses()
                 if kind_recorded(name, "load") or kind_recorded(name, "invoked")
             ]
+        ),
+        "param_supply_capable": _clickhouse_array(
+            [name for name in skill_supported_harnesses() if selection_supplies_instructions(name)]
         ),
         "param_project_only": _clickhouse_array(
             [
@@ -319,6 +329,11 @@ async def skill_activity_summary(
         "load_attempts": _int(aggregate, "total_load_attempts") if projected and recorded["load"] else None,
         "invoked_sessions": _int(aggregate, "invoked_sessions") if projected and recorded["invoked"] else None,
         "invocations": _int(aggregate, "total_invocations") if projected and recorded["invoked"] else None,
+        "instructions_supplied_inferred_sessions": (
+            _int(aggregate, "instructions_supplied_inferred_sessions")
+            if _int(aggregate, "inferred_supply_measurable_sessions")
+            else None
+        ),
         "harness_distribution": distribution,
         "version_distribution": versions,
         "activation_actions": {

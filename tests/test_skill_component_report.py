@@ -32,6 +32,7 @@ def _summary(observed: int, complete: int) -> dict:
         "load_attempts": 1,
         "invoked_sessions": 0,
         "invocations": 0,
+        "instructions_supplied_inferred_sessions": None,
         "harness_distribution": {"pi": 2},
         "version_distribution": {},
         "activation_actions": {"context_sessions": 0, "next_session_sessions": 0, "scope": "component"},
@@ -79,7 +80,13 @@ async def test_skill_report_states_what_the_evidence_does_and_does_not_show(monk
 @pytest.mark.asyncio
 async def test_invocation_only_skill_report_does_not_claim_a_confirmed_load(monkeypatch):
     summary = _summary(observed=1, complete=2)
-    summary.update(loaded_sessions=None, confirmed_loads=None, invoked_sessions=1, invocations=1)
+    summary.update(
+        loaded_sessions=None,
+        confirmed_loads=None,
+        invoked_sessions=1,
+        invocations=1,
+        instructions_supplied_inferred_sessions=1,
+    )
     monkeypatch.setattr(skill_queries, "skill_activity_summary", AsyncMock(return_value=summary))
 
     content = await component_report.generate_component_content(_report())
@@ -87,6 +94,19 @@ async def test_invocation_only_skill_report_does_not_claim_a_confirmed_load(monk
     assert "does not establish a separately confirmed skill load" in content["narrative"]["summary"]
     assert content["metrics"]["confirmed_loads"] is None
     assert content["metrics"]["invocations"] == 1
+    assert content["metrics"]["instructions_supplied_inferred_sessions"] == 1
+    assert "supplied the instructions (inferred)" in content["narrative"]["summary"]
+    assert "same invocations, not additional use" in content["narrative"]["summary"]
+    assert "followed" not in content["narrative"]["summary"].lower()
+    assert all("followed" not in note.lower() for note in content["coverage"]["limitations"])
+    assert "instructions_supplied_inferred_sessions" in content["narrative"]["evidence"]
+
+
+def test_other_harness_invocation_does_not_infer_instruction_supply():
+    summary = _summary(observed=1, complete=2)
+    summary.update(invoked_sessions=1, invocations=1, instructions_supplied_inferred_sessions=None)
+    narrative = component_report.generate_skill_sections(summary, summary["coverage"].model_dump(mode="json"))
+    assert "instructions (inferred)" not in narrative["summary"]
 
 
 @pytest.mark.parametrize("observed", [0, 1])

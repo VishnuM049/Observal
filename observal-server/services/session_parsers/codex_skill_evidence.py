@@ -68,6 +68,9 @@ def _time(record: dict, row: Mapping[str, object]) -> datetime | None:
 class CodexSkillEvidenceExtractor:
     observed_kinds: frozenset = frozenset({"available", "invoked"})
     observed_scopes: frozenset = frozenset({"project"})
+    # Only the tested 0.163.0 native selected_skill_instructions record (below)
+    # establishes this inference; it is not a separately confirmed load.
+    selected_instructions_supplied = True
 
     def extract(self, rows: Sequence[Mapping[str, object]]) -> SkillEvidenceExtraction:
         records: list[tuple[int, dict, Mapping[str, object]]] = []

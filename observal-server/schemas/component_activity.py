@@ -205,7 +205,7 @@ SKILL_LOADS_LIMITATION = (
 )
 SKILL_CONTEXT_LIMITATION = (
     "entered_context_not_helped: a confirmed load or an invocation shows the skill's instructions "
-    "entered the model's context, not that the skill was followed or improved the outcome"
+    "entered the model's context; effectiveness is not measured"
 )
 
 
@@ -253,6 +253,14 @@ class SkillActivitySummaryResponse(BaseModel):
     load_attempts: int | None = Field(description="Unconfirmed read attempts; null when no harness records loads")
     invoked_sessions: int | None = Field(description="Null when no harness in the cohort records invocations")
     invocations: int | None
+    instructions_supplied_inferred_sessions: int | None = Field(
+        default=None,
+        description=(
+            "Sessions with an attributed native selected-skill invocation in a verified Codex 0.163.0 project "
+            "install. The same selection is already counted under invocations; not another use or a confirmed load. "
+            "Null without measurable sessions of that kind; zero covers native selection only, not manual reads."
+        ),
+    )
     harness_distribution: dict[str, int]
     version_distribution: dict[str, int] = Field(default_factory=dict)
     activation_actions: ActivationActions

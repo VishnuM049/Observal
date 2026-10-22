@@ -100,6 +100,7 @@ async def _generate_skill_content(report: InsightReport) -> dict:
                 "load_attempts",
                 "invoked_sessions",
                 "invocations",
+                "instructions_supplied_inferred_sessions",
                 "harness_distribution",
                 "version_distribution",
                 "activation_actions",
@@ -118,12 +119,19 @@ def generate_skill_sections(summary: dict, coverage: dict) -> dict:
         if summary["invocations"] and not summary["confirmed_loads"]:
             conclusion = (
                 "An explicit skill invocation was recorded in processed present sessions. "
-                "This does not establish a separately confirmed skill load or show the skill was followed or helped."
+                "This does not establish a separately confirmed skill load or measure effectiveness."
             )
         else:
             conclusion = (
                 "The skill's instructions entered context in processed present sessions "
-                "(a confirmed load or an invocation). This does not show the skill was followed or helped."
+                "(a confirmed load or an invocation). Effectiveness is not measured."
+            )
+        if summary.get("instructions_supplied_inferred_sessions"):
+            count = summary["instructions_supplied_inferred_sessions"]
+            conclusion += (
+                f" In {count} {'session' if count == 1 else 'sessions'}, Codex's native skill selection "
+                "supplied the instructions (inferred). This describes those same invocations, not additional "
+                "use or a separately confirmed load."
             )
         if "skill_scope_not_recorded" in coverage["reasons"]:
             conclusion += " Other installed scopes remain unknown."
@@ -154,6 +162,7 @@ def generate_skill_sections(summary: dict, coverage: dict) -> dict:
             "confirmed_loads": summary["confirmed_loads"],
             "unconfirmed_load_attempts": summary["load_attempts"],
             "invoked": summary["invocations"],  # None: the harness records no invocation origin
+            "instructions_supplied_inferred_sessions": summary.get("instructions_supplied_inferred_sessions"),
             "activated": summary["activation_actions"],  # configuration actions, not use
             "unknown": list(coverage["reasons"]),
         },

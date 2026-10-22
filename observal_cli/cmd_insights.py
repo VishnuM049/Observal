@@ -219,6 +219,13 @@ def insights_activity(
         else:
             invocation_count = "not measured"
         rprint(f"  Confirmed loads: {loads}  Invocations: {invocation_count}")
+        supplied = data.get("instructions_supplied_inferred_sessions")
+        if supplied is not None:
+            rprint(
+                f"  Instructions supplied (inferred): {supplied} {'session' if supplied == 1 else 'sessions'} "
+                "with native Codex selection; "
+                "same invocations, not additional use or confirmed loads. Manual reads are not counted."
+            )
     else:
         runs = (
             data.get("sessions_with_recorded_run", 0)
@@ -711,6 +718,13 @@ def _render_skill_report(data: dict) -> None:
     )
     for label, value in rows:
         rprint(f"  {label}: {esc(value)}")
+    supplied = metrics.get("instructions_supplied_inferred_sessions")
+    if supplied is not None:
+        rprint(
+            f"  Instructions supplied (inferred): {supplied} {'session' if supplied == 1 else 'sessions'} "
+            "with native Codex selection "
+            "(the same invocations, not additional use or confirmed loads; manual reads are not counted)."
+        )
     if measured and metrics.get("load_attempts"):
         rprint(f"  [dim]{metrics['load_attempts']} load attempts failed or had no confirmed result (not loads).[/dim]")
     for label, values in (

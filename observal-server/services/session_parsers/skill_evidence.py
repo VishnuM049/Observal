@@ -72,6 +72,9 @@ class SkillEvidenceExtractor(Protocol):
     # The evidence kinds this harness's transcripts can show, tied to a file.
     observed_kinds: frozenset[EvidenceKind]
     observed_scopes: frozenset[str]
+    # A selected-skill invocation can also imply instructions were supplied;
+    # this is a description of the same fact, not another use or a load.
+    selected_instructions_supplied: bool
 
     def extract(self, rows: Sequence[Mapping[str, object]]) -> SkillEvidenceExtraction: ...
 
@@ -95,6 +98,12 @@ def kind_recorded(harness: str, kind: EvidenceKind, scope: str | None = None) ->
         return False
     extractor = _extractors()[extractor_id]
     return kind in extractor.observed_kinds and (scope is None or scope in extractor.observed_scopes)
+
+
+def selection_supplies_instructions(harness: str) -> bool:
+    """Only opt in native selection formats verified to include the skill instructions."""
+    extractor_id = HARNESS_REGISTRY.get(harness, {}).get("skill_evidence_extractor")
+    return bool(extractor_id) and _extractors()[extractor_id].selected_instructions_supplied
 
 
 def extract_skill_evidence(harness: str, rows: Sequence[Mapping[str, object]]) -> SkillEvidenceExtraction:

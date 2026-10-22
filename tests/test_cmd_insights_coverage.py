@@ -886,6 +886,7 @@ def _skill_report(**metrics) -> dict:
         "load_attempts": 0,
         "invoked_sessions": 2,
         "invocations": 2,
+        "instructions_supplied_inferred_sessions": None,
         "available_sessions": 1,
         "harness_distribution": {"claude-code": 5, "pi": 1},
         "version_distribution": {"unknown": 6},
@@ -920,6 +921,7 @@ def test_skill_component_reports_use_skill_routes_and_never_mcp_wording(cli):
     assert "Sessions with a confirmed load: 2" in text
     assert "Sessions where offered: 1 (only harnesses that record it)" in text
     assert "entered_context_not_helped" in text
+    assert "Instructions supplied (inferred)" not in text
     for mcp_only in ("Observed calls", "What the published calls suggest", "collisions,"):
         assert mcp_only not in text
 
@@ -931,6 +933,21 @@ def test_skill_component_reports_use_skill_routes_and_never_mcp_wording(cli):
     runner.invoke(insights.insights_app, ["show", "--component", "skill", "team/review"])
     text = " ".join(cli.messages())
     assert "Sessions where offered: not recorded" in text and "Sessions with an invocation: not recorded" in text
+
+    cli.client_get.side_effect = [
+        [{"id": REPORT_ID, "status": "completed"}],
+        _skill_report(
+            loaded_sessions=None,
+            confirmed_loads=None,
+            invoked_sessions=1,
+            invocations=1,
+            instructions_supplied_inferred_sessions=1,
+        ),
+    ]
+    runner.invoke(insights.insights_app, ["show", "--component", "skill", "team/review"])
+    text = " ".join(cli.messages())
+    assert "Instructions supplied (inferred): 1 session" in text
+    assert "same invocations, not additional use or confirmed loads" in text
 
     cli.client_get.side_effect = _blocked("skill generate should not check LLM status").side_effect
     _returns(cli.client_post, {"id": REPORT_ID, "status": "pending"})

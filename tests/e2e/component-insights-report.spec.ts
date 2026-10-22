@@ -110,8 +110,45 @@ test.describe("Component Insights report", () => {
       await expect(page.getByRole("region", { name: "Evidence" })).toContainText("Not recorded");
       await expect(page.getByText("No session in this cohort has measurable skill-use evidence.", { exact: false })).toBeVisible();
       await expect(page.getByText("Being offered does not establish a skill load or an invocation.")).toBeVisible();
+      await expect(page.getByText("Instructions supplied (inferred):", { exact: false })).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`codex-availability-${name}.png`), fullPage: true });
+    }
+  });
+
+  test("Codex selected-skill inference is the same invocation, never an extra load", async ({ page }, testInfo) => {
+    await loginToWebUI(page);
+    await page.route("**/api/v1/insights/reports/report-fixture", (route) => route.fulfill({
+      status: 200, contentType: "application/json", body: JSON.stringify({
+        ...base, component_type: "skill", component_name: "team/probe-e2e-skill",
+        metrics: {
+          present_sessions: 2, present_users: 1, available_sessions: 2,
+          loaded_sessions: null, confirmed_loads: null, load_attempts: null,
+          invoked_sessions: 1, invocations: 1, instructions_supplied_inferred_sessions: 1,
+          harness_distribution: { codex: 2 }, version_distribution: { "1.0.0": 2 },
+        },
+        coverage: {
+          ...coverage, presence: { ...coverage.presence, present_sessions: 2, eligible_sessions: 2 },
+          projection: { ...coverage.projection, projection_complete_sessions: 2, projection_pending_sessions: 0 },
+          evidence: { collision_facts: 0, unmatched_facts: 0 },
+          usage_rate_denominator_sessions: 2, observed_sessions: 1,
+          reasons: [], limitations: ["loads_not_recorded: no separately confirmed skill loads"],
+        },
+        narrative: { summary: "An explicit skill invocation was recorded. In 1 session, Codex's native skill selection supplied the instructions (inferred). This is the same invocation, not a separately confirmed load; effectiveness is not measured." },
+      }),
+    }));
+    for (const [name, width, height] of [["desktop", 1280, 800], ["mobile", 390, 844]] as const) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/insights/report-fixture");
+      const evidence = page.getByRole("region", { name: "Evidence" });
+      await expect(evidence.getByText("Instructions supplied (inferred): 1 session.", { exact: false })).toBeVisible();
+      await expect(evidence).toContainText("same invocations, not additional use or confirmed loads");
+      await expect(evidence).toContainText("manual file reads are not counted");
+      await expect(evidence).not.toContainText("followed");
+      await expect(evidence.getByText("Not recorded", { exact: true })).toBeVisible();
+      await expect(evidence.locator("dt").filter({ hasText: "Invocations" }).locator("..").locator("dd").first()).toHaveText("1");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`codex-inferred-supply-${name}.png`), fullPage: true });
     }
   });
 
@@ -156,7 +193,7 @@ test.describe("Component Insights report", () => {
         reasons: ["unattributed_skill_facts"],
         limitations: ["entered_context_not_helped: a load puts instructions into context; it does not prove effectiveness", "invocations_not_recorded: Pi cannot distinguish an explicit skill invocation"],
       },
-      narrative: { summary: "The skill's instructions entered context. This does not show the skill was followed or helped." },
+      narrative: { summary: "The skill's instructions entered context. Effectiveness is not measured." },
     };
     await loginToWebUI(page);
     await page.setViewportSize({ width: 1440, height: 900 });
