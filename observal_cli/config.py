@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shutil
+import stat
 import tomllib
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -185,7 +186,17 @@ def _read_json_object(path: Path, *, operation: str) -> dict:
 
 def _write_json(path: Path, data: dict) -> None:
     """Atomically write a JSON object with owner-only permissions."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # The Cursor source collector deliberately refuses a group-readable
+    # ~/.observal directory. Fresh login/registry installs used to create it
+    # as 0755 under a common umask, making telemetry silently unavailable.
+    # Tighten only an owned real directory; never follow a configuration symlink.
+    if os.name == "posix":
+        parent = path.parent.lstat()
+        if not stat.S_ISDIR(parent.st_mode) or parent.st_uid != os.geteuid():
+            raise PermissionError(13, "Observal config directory must be owned and not a symlink", str(path.parent))
+        if stat.S_IMODE(parent.st_mode) & 0o077:
+            path.parent.chmod(0o700)
     temporary: Path | None = None
     try:
         with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False) as file:

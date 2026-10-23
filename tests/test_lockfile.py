@@ -273,6 +273,16 @@ def test_v1_migration_noops_for_missing_or_current_files(isolated_lockfile):
 
 
 @pytest.mark.skipif(lockfile.fcntl is None, reason="flock is POSIX-only")
+def test_fresh_registry_install_creates_private_config_directory_under_common_umask(isolated_lockfile):
+    old_umask = os.umask(0o022)
+    try:
+        lockfile.write_lockfile({"registries": {}})
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(isolated_lockfile.config_dir.stat().st_mode) == 0o700
+
+
+@pytest.mark.skipif(lockfile.fcntl is None, reason="flock is POSIX-only")
 def test_write_is_atomic_locked_and_respects_restrictive_umask(isolated_lockfile, monkeypatch):
     data = {"registries": {}}
     operations: list[int] = []

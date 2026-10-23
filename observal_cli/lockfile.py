@@ -197,7 +197,7 @@ def _write_locked(data: dict) -> None:
 
 def write_lockfile(data: dict) -> None:
     """Write the complete lockfile atomically with file locking."""
-    LOCKFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LOCKFILE_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with _exclusive_lock():
         _write_locked(data)
     optic.debug("lockfile written: {}", LOCKFILE_PATH)
@@ -205,7 +205,7 @@ def write_lockfile(data: dict) -> None:
 
 def update_lockfile(mutate: Any) -> Any:
     """Serialize the entire read/modify/write, including across different targets."""
-    LOCKFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LOCKFILE_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with _exclusive_lock(_LOCKFILE_LOCK):
         if LOCKFILE_PATH.exists():
             try:

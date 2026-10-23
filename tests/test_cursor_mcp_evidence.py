@@ -139,6 +139,22 @@ def test_call_pair_only_emits_server_tool_hash_and_outcome(source_environment, r
     assert "tool_input" not in "".join(lines) and "result_json" not in "".join(lines)
 
 
+def test_group_readable_config_directory_cannot_produce_a_no_tool_heartbeat(source_environment):
+    home, _project, source, event = source_environment
+    private_dir = home / ".observal"
+    private_dir.chmod(0o755)
+    assert not evidence.record_hook(event("sessionStart"), home=home)
+    assert not evidence.record_hook(event("sessionEnd"), home=home)
+    assert evidence.source_records(source, event("sessionEnd"), home=home) == ()
+    private_dir.chmod(0o700)
+    assert evidence.record_hook(event("sessionStart"), home=home)
+    assert evidence.record_hook(event("sessionEnd"), home=home)
+    assert [
+        json.loads(line)[evidence._KEY]["event"]
+        for line in evidence.source_records(source, event("sessionEnd"), home=home)
+    ] == ["start", "end"]
+
+
 def test_same_tool_on_second_server_is_distinct_and_native_count_is_required(source_environment):
     home, _project, source, event = source_environment
     _attempt(source, count=2)
@@ -287,6 +303,7 @@ def test_doctor_installs_and_removes_only_managed_cursor_evidence(tmp_path, monk
 
     home = tmp_path / "home"
     (home / ".cursor").mkdir(parents=True)
+    (home / ".observal").mkdir(mode=0o700)
     monkeypatch.setattr(Path, "home", lambda: home)
     assert cmd_doctor._patch_cursor(dry_run=False)
     data = json.loads((home / ".cursor/hooks.json").read_text())
@@ -303,6 +320,11 @@ def test_doctor_installs_and_removes_only_managed_cursor_evidence(tmp_path, monk
     issues, warnings = [], []
     cmd_doctor._check_cursor(issues, warnings)
     assert not issues and not warnings
+    (home / ".observal").chmod(0o755)
+    cmd_doctor._check_cursor(issues, warnings)
+    assert any("requires chmod 700 ~/.observal" in warning for warning in warnings)
+    (home / ".observal").chmod(0o700)
+    warnings.clear()
     data["hooks"]["sessionEnd"].insert(0, {"command": "foreign"})
     data["hooks"]["sessionEnd"].insert(0, {"command": "someone_else_session_push_helper"})
     (home / ".cursor/hooks.json").write_text(json.dumps(data))

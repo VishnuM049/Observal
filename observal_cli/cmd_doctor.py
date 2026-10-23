@@ -18,7 +18,9 @@ push session JSONL incrementally to the server.
 
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 import tomllib
 from contextlib import nullcontext, redirect_stdout
@@ -457,6 +459,23 @@ def _check_cursor(issues: list, warnings: list):
 
         if _hooks_hash(Path.home()) is None:
             warnings.append("Cursor MCP evidence hooks are incomplete or shadowed; MCP use remains unmeasurable.")
+        # Existing CLI homes created before private-directory enforcement may
+        # be 0755. The collector refuses them rather than writing a journal;
+        # diagnosing only the hook JSON would falsely suggest it is healthy.
+        if os.name == "posix":
+            private_dir = Path.home() / ".observal"
+            try:
+                directory = private_dir.lstat()
+                if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid():
+                    warnings.append("Cursor MCP evidence requires an owned, non-symlink ~/.observal directory.")
+                elif stat.S_IMODE(directory.st_mode) & 0o077:
+                    warnings.append(
+                        "Cursor MCP evidence requires chmod 700 ~/.observal; the current directory is not private."
+                    )
+            except FileNotFoundError:
+                warnings.append("Cursor MCP evidence needs Observal login in this home before it can be delivered.")
+            except OSError:
+                warnings.append("Cursor MCP evidence cannot inspect the Observal config directory.")
 
 
 def _check_codex(issues: list, warnings: list):

@@ -191,6 +191,40 @@ def test_config_save_sets_permissions(tmp_path):
         assert mode == 0o600
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX directory permissions")
+def test_config_save_repairs_existing_group_readable_directory(tmp_path):
+    from observal_cli import config
+
+    directory = tmp_path / ".observal"
+    directory.mkdir()
+    directory.chmod(0o755)
+    with (
+        patch.object(config, "CONFIG_DIR", directory),
+        patch.object(config, "CONFIG_FILE", directory / "config.json"),
+    ):
+        config.save({"server_url": "http://127.0.0.1:8000", "access_token": "private-test-token"})
+    assert directory.stat().st_mode & 0o777 == 0o700
+    assert (directory / "config.json").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX symlink permissions")
+def test_config_save_rejects_symlinked_directory(tmp_path):
+    from observal_cli import config
+
+    destination = tmp_path / "other"
+    destination.mkdir()
+    linked = tmp_path / ".observal"
+    linked.symlink_to(destination, target_is_directory=True)
+    with (
+        patch.object(config, "CONFIG_DIR", linked),
+        patch.object(config, "CONFIG_FILE", linked / "config.json"),
+        pytest.raises(CliError) as error,
+    ):
+        config.save({"server_url": "http://127.0.0.1:8000", "access_token": "private-test-token"})
+    assert error.value.category is ErrorCategory.PERMISSION
+    assert not list(destination.iterdir())
+
+
 def test_config_write_permission_failure_is_categorized(monkeypatch):
     from observal_cli import config
 
