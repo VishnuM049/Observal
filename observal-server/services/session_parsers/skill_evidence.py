@@ -16,6 +16,9 @@ Evidence kinds, none of which shows that a skill achieved anything:
   harness records a distinguishable invocation origin. Pi does not: its
   ``/skill:name`` expansion is stored as an ordinary user message, which
   pasted text can reproduce, so the Pi extractor never emits ``invoked``.
+* ``file_access``: a successful native file-read result for the exact verified
+  SKILL.md path. This is neither an invocation nor a confirmed skill load;
+  missing reads cannot establish a zero-access denominator.
 
 Each extractor declares the kinds and install scopes it can observe
 (``observed_kinds`` and ``observed_scopes``). Outside either set, counts
@@ -42,7 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from datetime import datetime
 
-EvidenceKind = Literal["available", "load", "invoked"]
+EvidenceKind = Literal["available", "load", "invoked", "file_access"]
 
 
 @dataclass(frozen=True)

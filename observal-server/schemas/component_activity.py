@@ -207,6 +207,10 @@ SKILL_CONTEXT_LIMITATION = (
     "entered_context_not_helped: a confirmed load or an invocation shows the skill's instructions "
     "entered the model's context; effectiveness is not measured"
 )
+SKILL_FILE_ACCESS_LIMITATION = (
+    "skill_file_access_positive_only: only matched successful direct Codex 0.163.0 project SKILL.md reads "
+    "supply a lower bound; missing or unsupported read forms are unknown, never zero or an access denominator"
+)
 
 
 class SkillEvidenceCoverage(BaseModel):
@@ -231,7 +235,12 @@ class SkillActivityCoverage(BaseModel):
     attribution_state: SkillAttributionState
     reasons: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(
-        default_factory=lambda: [SKILL_CONTEXT_LIMITATION, LAYER_STABILITY_LIMITATION, FINAL_PUSH_LIMITATION]
+        default_factory=lambda: [
+            SKILL_CONTEXT_LIMITATION,
+            SKILL_FILE_ACCESS_LIMITATION,
+            LAYER_STABILITY_LIMITATION,
+            FINAL_PUSH_LIMITATION,
+        ]
     )
 
 
@@ -261,6 +270,14 @@ class SkillActivitySummaryResponse(BaseModel):
             "Null without measurable sessions of that kind; zero covers native selection only, not manual reads."
         ),
     )
+    file_access_sessions: int | None = Field(
+        default=None,
+        description=(
+            "Lower bound of sessions with a successful, uniquely pinned Codex 0.163.0 project SKILL.md "
+            "direct read. Distinct from invocation and confirmed load. Null means unknown, never zero: "
+            "other read forms and unsupported sessions have no completeness proof or denominator."
+        ),
+    )
     harness_distribution: dict[str, int]
     version_distribution: dict[str, int] = Field(default_factory=dict)
     activation_actions: ActivationActions
@@ -278,6 +295,9 @@ class SkillActivitySession(BaseModel):
     confirmed_loads: int | None = Field(description="Null when this harness does not record loads")
     load_attempts: int | None = Field(description="Null when this harness does not record loads")
     invocations: int | None = Field(description="Null when this harness does not record invocations")
+    file_accessed: bool | None = Field(
+        default=None, description="True for an attributed successful direct read; null is unknown, not no access"
+    )
 
 
 class SkillActivitySessionsResponse(BaseModel):

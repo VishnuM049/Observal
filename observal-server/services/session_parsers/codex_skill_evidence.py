@@ -11,8 +11,11 @@ be a candidate; the verified layer pin and its file/location fingerprint are
 still required by the shared skill matcher. Selection is a separate first-party
 ``skills.selected_skill_instructions`` content kind, with one tagged, rooted
 SKILL.md expansion linked to a user-text message in the same turn. Pasted
-markup, an ordinary file read or a ``$name`` user message alone never qualifies.
-No prompt, description, instruction body or path is published.
+markup, an ordinary file read or a ``$name`` user message alone never qualifies
+as selection. Separately, a successful native ``exec_command`` direct read
+of the exact inventory SKILL.md under the native cwd supplies positive-only
+file-access evidence. No prompt, description, command, result body or path is
+published; the read is not an invocation or a confirmed skill load.
 
 Other Codex versions and missing/ambiguous inventories are unsupported, not
 measured zero. User-scope and parent-workspace skills are not attributed.
@@ -21,6 +24,7 @@ measured zero. User-scope and parent-workspace skills are not attributed.
 from __future__ import annotations
 
 import hashlib
+import json
 import posixpath
 import re
 from collections import defaultdict
@@ -41,6 +45,13 @@ _ENTRY = re.compile(
 )
 _SELECTION = re.compile(
     rf"<skill>\n<name>(?P<alias>{_ALIAS})</name>\n<path>(?P<path>/[^<>\r\n]{{1,4096}}/SKILL\.md)</path>\n(?P<body>[\s\S]{{0,65536}})</skill>\Z"
+)
+# Only the observed single-command Codex exec_command form, resolved against
+# native session cwd; never arbitrary relative paths or shell expressions.
+_DIRECT_READ = re.compile(rf"cat \.agents/skills/(?P<alias>{_ALIAS})/SKILL\.md\Z")
+_SUCCESS_HEADER = re.compile(
+    r"\AChunk ID: [^\r\n]{1,128}\nWall time: \d+(?:\.\d+)? seconds\n"
+    r"Process exited with code 0\nOriginal token count: \d+\nOutput:\n"
 )
 
 
@@ -65,8 +76,106 @@ def _time(record: dict, row: Mapping[str, object]) -> datetime | None:
     return None
 
 
+def _file_accesses(
+    records: list[tuple[int, dict, Mapping[str, object]]],
+    candidates: dict[str, list[SkillEvidence]],
+) -> tuple[SkillEvidence, ...]:
+    """Positive-only, linked successful direct reads; never store command/output text.
+
+    An ambiguous call or result ID suppresses the file-access channel for the
+    whole session. No missing-access claim is possible from this narrow form.
+    """
+    calls: dict[str, tuple[int, str, Mapping[str, object], datetime]] = {}
+    results: dict[str, tuple[int, dict, Mapping[str, object]]] = {}
+    seen_calls: set[str] = set()
+    duplicate = False
+    for offset, record, row in records:
+        if record.get("type") != "response_item" or not isinstance(record.get("payload"), dict):
+            continue
+        payload = record["payload"]
+        kind, call_id = payload.get("type"), payload.get("call_id")
+        if kind not in ("function_call", "function_call_output"):
+            continue
+        if not isinstance(call_id, str) or not call_id or len(call_id) > 128:
+            # A malformed relevant native event cannot be paired reliably.
+            return ()
+        if kind == "function_call_output":
+            if call_id in results:
+                duplicate = True
+            results[call_id] = (offset, record, row)
+            continue
+        if call_id in seen_calls:
+            duplicate = True
+        seen_calls.add(call_id)
+        if payload.get("name") != "exec_command":
+            continue
+        args = payload.get("arguments")
+        if not isinstance(args, str) or len(args) > 8192:
+            continue
+        try:
+            parsed = json.loads(args)
+        except ValueError:
+            continue
+        if not isinstance(parsed, dict) or set(parsed) != {"cmd", "max_output_chars"}:
+            continue
+        if type(parsed["max_output_chars"]) is not int or not 1 <= parsed["max_output_chars"] <= 65536:
+            continue
+        command = parsed["cmd"]
+        if not isinstance(command, str):
+            continue
+        match = _DIRECT_READ.fullmatch(command)
+        if not match:
+            continue
+        alias = match.group("alias")
+        if len(candidates.get(alias, ())) != 1:
+            continue
+        # The exact relative command resolves under the native session cwd
+        # to the one validated inventory root, whose path hash is later joined
+        # to the verified install's resolved SKILL.md location.
+        if not candidates[alias][0].location_sha256:
+            continue
+        time = _time(record, row)
+        if payload.get("status") != "completed" or time is None:
+            continue
+        calls[call_id] = (offset, alias, row, time)
+    if duplicate:
+        return ()
+    evidence: list[SkillEvidence] = []
+    for call_id, (offset, alias, call_row, time) in calls.items():
+        result = results.get(call_id)
+        if result is None:
+            continue
+        result_offset, result_record, result_row = result
+        result_time = _time(result_record, result_row)
+        output = result_record["payload"].get("output")
+        if (
+            result_offset <= offset
+            or result_time is None
+            or result_time < time
+            or not isinstance(output, str)
+            or not _SUCCESS_HEADER.match(output)
+            or not isinstance(call_row.get("layer_hash"), str)
+            or not call_row["layer_hash"]
+            or result_row.get("layer_hash") != call_row["layer_hash"]
+        ):
+            continue
+        evidence.append(
+            SkillEvidence(
+                "file_access",
+                "project",
+                alias,
+                offset,
+                f"skill-file-access:project:{alias}:{hashlib.sha256(call_id.encode()).hexdigest()}",
+                result_time,
+                result_state="success",
+                location_sha256=candidates[alias][0].location_sha256,
+            )
+        )
+    return tuple(evidence)
+
+
 class CodexSkillEvidenceExtractor:
-    observed_kinds: frozenset = frozenset({"available", "invoked"})
+    observed_kinds: frozenset = frozenset({"available", "invoked", "file_access"})
     observed_scopes: frozenset = frozenset({"project"})
     # Only the tested 0.163.0 native selected_skill_instructions record (below)
     # establishes this inference; it is not a separately confirmed load.
@@ -233,4 +342,5 @@ class CodexSkillEvidenceExtractor:
         # prove the absence of a selected-skill message (no zero denominator).
         if not prompt_turns:
             return SkillEvidenceExtraction("unsupported", (), malformed)
-        return SkillEvidenceExtraction("supported", tuple((*evidence, *selected)), malformed)
+        accesses = _file_accesses(records, candidates)
+        return SkillEvidenceExtraction("supported", tuple((*evidence, *selected, *accesses)), malformed)

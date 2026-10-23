@@ -197,6 +197,8 @@ export interface SkillInsightMetrics {
 	invocations: number | null;
 	/** Native Codex project-skill selection, also counted as invocation. Older reports omit it. */
 	instructions_supplied_inferred_sessions?: number | null;
+	/** Positive-only lower bound for successful verified direct SKILL.md reads; null is unknown, never zero. */
+	file_access_sessions?: number | null;
 	harness_distribution: Record<string, number>;
 	version_distribution: Record<string, number>;
 }

@@ -62,7 +62,8 @@ _SKILL_EVIDENCE = (
            countIf(a.evidence_kind = 'skill_available') AS available_facts,
            countIf(a.evidence_kind = 'skill_load' AND a.result_state = 'success') AS confirmed_loads,
            countIf(a.evidence_kind = 'skill_load' AND a.result_state != 'success') AS load_attempts,
-           countIf(a.evidence_kind = 'skill_invoked') AS invocations
+           countIf(a.evidence_kind = 'skill_invoked') AS invocations,
+           countIf(a.evidence_kind = 'skill_file_access' AND a.result_state = 'success') AS file_accesses
     FROM component_activity AS a FINAL
     INNER JOIN ("""
     + _LATEST_SKILL_PUBLICATION
@@ -70,7 +71,7 @@ _SKILL_EVIDENCE = (
       ON a.user_id = latest.user_id AND a.harness = latest.harness AND a.session_id = latest.session_id
      AND a.projection_generation = latest.generation
     WHERE a.project_id = {project_id:String} AND a.projection_version = {projection_version:UInt16}
-      AND a.evidence_kind IN ('skill_available', 'skill_load', 'skill_invoked')
+      AND a.evidence_kind IN ('skill_available', 'skill_load', 'skill_invoked', 'skill_file_access')
       AND a.component_type = 'skill' AND a.component_id = {component_id:String}
       AND ({component_version_id:String} = '' OR a.component_version_id = {component_version_id:String})
     GROUP BY a.user_id, a.harness, a.session_id"""
@@ -114,7 +115,8 @@ _SKILL_SESSIONS = (
            p.collision_count AS collision_count, p.unmatched_count AS unmatched_count,
            p.unknown_result_count AS unknown_result_count,
            e.available_facts AS available_facts, e.confirmed_loads AS confirmed_loads,
-           e.load_attempts AS load_attempts, e.invocations AS invocations
+           e.load_attempts AS load_attempts, e.invocations AS invocations,
+           e.file_accesses AS file_accesses
 """
     + cohort_session_joins_sql(_LATEST_SKILL_PUBLICATION, _SKILL_MARKER_STATES, _SKILL_EVIDENCE, "e")
     + """ LEFT JOIN ("""
@@ -171,6 +173,10 @@ _SKILL_SUMMARY = (
            countIf(projection_state = 'complete' AND scope_measurable
                    AND has({supply_capable:Array(String)}, harness) AND invocations > 0)
                AS instructions_supplied_inferred_sessions,
+           -- Positive-only lower bound; no read-form completeness proof exists
+           -- for a zero-access denominator, even in complete projections.
+           countIf(projection_state = 'complete' AND scope_measurable AND file_accesses > 0)
+               AS file_access_sessions,
            countIf(projection_state = 'complete' AND scope_measurable
                    AND (confirmed_loads > 0 OR invocations > 0)) AS observed_sessions
     FROM ("""
@@ -334,6 +340,9 @@ async def skill_activity_summary(
             if _int(aggregate, "inferred_supply_measurable_sessions")
             else None
         ),
+        # The supported direct-read form supplies positive evidence, not a
+        # complete inventory of all possible file reads. Never publish zero.
+        "file_access_sessions": _int(aggregate, "file_access_sessions") or None,
         "harness_distribution": distribution,
         "version_distribution": versions,
         "activation_actions": {
@@ -396,6 +405,7 @@ async def skill_activity_sessions(
                 "invocations": _int(row, "invocations")
                 if measurable and kind_recorded(row["harness"], "invoked")
                 else None,
+                "file_accessed": True if measurable and _int(row, "file_accesses") > 0 else None,
             }
         )
     next_cursor = encode_cursor(page[-1], period[1], scope=cursor_scope) if len(rows) > limit and page else None

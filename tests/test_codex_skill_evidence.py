@@ -84,6 +84,174 @@ def test_native_selected_skill_has_tagged_project_origin_not_a_file_read():
     assert "SKILL.md" not in str(result.evidence[1])
 
 
+def direct_read_rows():
+    """Sanitized Codex 0.163.0 native exec_command/result; no real skill text."""
+    items = [dict(row, layer_hash="v2_project") for row in rows()]
+    path = f".agents/skills/{ALIAS}/SKILL.md"
+    items.extend(
+        [
+            {
+                "is_source_record": 1,
+                "line_offset": 4,
+                "layer_hash": "v2_project",
+                "raw_line": json.dumps(
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-10-17T06:27:01Z",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "exec_command",
+                            "status": "completed",
+                            "call_id": "safe-call-id",
+                            "arguments": json.dumps({"cmd": f"cat {path}", "max_output_chars": 2000}),
+                        },
+                    }
+                ),
+                "line_hash": "call-hash",
+            },
+            {
+                "is_source_record": 1,
+                "line_offset": 5,
+                "layer_hash": "v2_project",
+                "raw_line": json.dumps(
+                    {
+                        "type": "response_item",
+                        "timestamp": "2026-10-17T06:27:02Z",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "safe-call-id",
+                            "output": "Chunk ID: abc123\nWall time: 0.051 seconds\nProcess exited with code 0\n"
+                            "Original token count: 2\nOutput:\nInert fixture content.\n",
+                        },
+                    }
+                ),
+                "line_hash": "result-hash",
+            },
+        ]
+    )
+    return items
+
+
+def test_completed_direct_skill_file_read_is_positive_access_not_invocation_or_load():
+    result = extract_skill_evidence("codex", direct_read_rows())
+    assert result.status == "supported"
+    assert [fact.kind for fact in result.evidence] == ["available", "file_access"]
+    access = result.evidence[1]
+    assert (access.alias, access.scope, access.source_line_offset, access.result_state) == (
+        ALIAS,
+        "project",
+        4,
+        "success",
+    )
+    assert access.location_sha256 == result.evidence[0].location_sha256
+    assert "safe-call-id" not in str(access) and "Inert fixture content" not in str(access)
+    assert access.tool_use_id == ""
+    assert kind_recorded("codex", "file_access", "project")
+    assert not any(kind_recorded(name, "file_access") for name in ("pi", "claude-code", "kiro"))
+
+
+@pytest.mark.parametrize(
+    ("index", "mutation"),
+    [
+        (4, lambda r: r["payload"].update(status="in_progress")),
+        (4, lambda r: r["payload"].update(call_id="another")),
+        (4, lambda r: r["payload"].update(name="other_tool")),
+        (
+            4,
+            lambda r: r["payload"].update(
+                arguments=json.dumps(
+                    {
+                        "cmd": "cat /private/tmp/observal-codex-proof/.agents/skills/matrix-probe-skill/SKILL.md",
+                        "max_output_chars": 2000,
+                    }
+                )
+            ),
+        ),
+        (
+            4,
+            lambda r: r["payload"].update(
+                arguments=json.dumps(
+                    {
+                        "cmd": "cat /private/tmp/observal-codex-proof/.agents/skills/matrix-probe-skill/SKILL.md; true",
+                        "max_output_chars": 2000,
+                    }
+                )
+            ),
+        ),
+        (
+            4,
+            lambda r: r["payload"].update(
+                arguments=json.dumps(
+                    {
+                        "cmd": "cat /private/tmp/observal-codex-proof/.agents/skills/other/SKILL.md",
+                        "max_output_chars": 2000,
+                    }
+                )
+            ),
+        ),
+        (5, lambda r: r["payload"].update(call_id="unknown")),
+        (
+            5,
+            lambda r: r["payload"].update(
+                output="Chunk ID: abc123\nWall time: 0.051 seconds\nProcess exited with code 7\nOriginal token count: 2\nOutput:\nNo file\n"
+            ),
+        ),
+        (5, lambda r: r["payload"].update(output="User text: Process exited with code 0\nOutput:\nInert")),
+        (5, lambda r: r.update(timestamp="invalid")),
+    ],
+)
+def test_incomplete_failed_or_ambiguous_direct_read_is_unknown_not_access(index, mutation):
+    result = extract_skill_evidence("codex", changed(direct_read_rows(), index, mutation))
+    assert result.status == "supported"
+    assert [fact.kind for fact in result.evidence] == ["available"]
+
+
+def test_direct_file_read_rejects_source_drift_duplicate_ids_and_mismatched_version():
+    items = direct_read_rows()
+    changed_layer = [dict(row) for row in items]
+    changed_layer[5]["layer_hash"] = "v2_drifted"
+    assert [e.kind for e in extract_skill_evidence("codex", changed_layer).evidence] == ["available"]
+    duplicated_result = [*items, dict(items[5], line_offset=6)]
+    assert [e.kind for e in extract_skill_evidence("codex", duplicated_result).evidence] == ["available"]
+    duplicated_call = [*items, dict(items[4], line_offset=6)]
+    assert [e.kind for e in extract_skill_evidence("codex", duplicated_call).evidence] == ["available"]
+    unsupported = changed(items, 0, lambda r: r["payload"].update(cli_version="0.164.0"))
+    assert extract_skill_evidence("codex", unsupported).status == "unsupported"
+
+    access = extract_skill_evidence("codex", items).evidence[1]
+    candidate = {
+        "component_id": "pinned-listing",
+        "component_version_id": "pinned-version",
+        "local_name": ALIAS,
+        "scope": "project",
+        "location_sha256": access.location_sha256,
+        "identity_status": "resolved",
+        "verification_status": "verified",
+    }
+    matched = match_skill_evidence((access,), {"v2_project": [candidate]}, {4: "v2_project"})
+    assert len(matched.rows) == 1
+    assert matched.rows[0]["evidence_kind"] == "skill_file_access"
+    assert matched.rows[0]["component_version_id"] == "pinned-version"
+    assert "Inert fixture content" not in str(matched.rows) and "safe-call-id" not in str(matched.rows)
+    for replacement in (
+        {"verification_status": "drifted"},
+        {"verification_status": "unverified"},
+        {"scope": "user"},
+        {"location_sha256": "f" * 64},
+        {"component_version_id": ""},
+    ):
+        assert not match_skill_evidence((access,), {"v2_project": [candidate | replacement]}, {4: "v2_project"}).rows
+    assert not match_skill_evidence((access,), {"other-layer": [candidate]}, {4: "v2_project"}).rows
+    collision = match_skill_evidence(
+        (access,),
+        {"v2_project": [candidate, candidate | {"component_version_id": "other-version"}]},
+        {4: "v2_project"},
+    )
+    assert collision.rows == () and collision.collision_count == 1
+    duplicate_binding = match_skill_evidence((access,), {"v2_project": [candidate, dict(candidate)]}, {4: "v2_project"})
+    assert duplicate_binding.rows == () and duplicate_binding.collision_count == 1
+
+
 def test_pasted_expansion_and_manual_file_read_do_not_select_a_skill():
     pasted = changed(
         rows(),
@@ -391,6 +559,7 @@ async def test_codex_only_cohort_reports_offered_and_measured_no_invocation(monk
     assert (result["loaded_sessions"], result["confirmed_loads"], result["load_attempts"]) == (None, None, None)
     assert (result["invoked_sessions"], result["invocations"]) == (0, 0)
     assert result["instructions_supplied_inferred_sessions"] == 0
+    assert result["file_access_sessions"] is None  # no complete read inventory, never zero access
     assert result["coverage"].usage_rate_denominator_sessions == 1
     assert result["coverage"].attribution_state == "no_observed_skill_use"
     assert result["coverage"].usage_rate == 0
@@ -448,6 +617,44 @@ async def test_inferred_supply_is_subset_of_attributed_native_selection_not_a_se
     assert summary["confirmed_loads"] is None
     assert "has({supply_capable:Array(String)}, harness) AND invocations > 0" in skill_queries._SKILL_SUMMARY
     assert "AND scope_measurable) AS inferred_supply_measurable_sessions" in skill_queries._SKILL_SUMMARY
+
+
+@pytest.mark.asyncio
+async def test_file_access_positive_only_never_changes_skill_use_denominator(monkeypatch):
+    aggregate = {
+        "supported_present_sessions": 2,
+        "projection_complete_sessions": 2,
+        "usage_measurable_sessions": 2,
+        "available_scope_present_sessions": 2,
+        "available_measurable_sessions": 2,
+        "available_sessions": 2,
+        "invoked_scope_present_sessions": 2,
+        "invoked_measurable_sessions": 2,
+        "inferred_supply_measurable_sessions": 2,
+        "file_access_sessions": 1,
+    }
+
+    async def warehouse(sql, _params):
+        if sql == skill_queries._SKILL_SUMMARY:
+            return [aggregate]
+        if sql == skill_queries._HARNESSES:
+            return [{"harness": "codex", "sessions": 2}]
+        return [{}]
+
+    monkeypatch.setattr(skill_queries, "_rows", warehouse)
+    monkeypatch.setattr(skill_queries, "presence_coverage", AsyncMock(return_value={"present_sessions": 2}))
+    monkeypatch.setattr(skill_queries, "presence_version_distribution", AsyncMock(return_value={}))
+    now = datetime.now(UTC)
+    args = ("default", "11111111-1111-4111-8111-111111111111", None, (now - timedelta(days=1), now))
+    result = await skill_queries.skill_activity_summary(*args)
+    assert result["file_access_sessions"] == 1
+    assert result["invocations"] == 0 and result["confirmed_loads"] is None
+    assert result["instructions_supplied_inferred_sessions"] == 0
+    assert result["coverage"].observed_sessions == 0
+    assert result["coverage"].usage_rate_denominator_sessions == 2
+    assert "a.evidence_kind = 'skill_file_access' AND a.result_state = 'success'" in skill_queries._SKILL_EVIDENCE
+    aggregate["file_access_sessions"] = 0
+    assert (await skill_queries.skill_activity_summary(*args))["file_access_sessions"] is None
 
 
 @pytest.mark.asyncio

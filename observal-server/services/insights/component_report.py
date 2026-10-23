@@ -105,7 +105,8 @@ async def _generate_skill_content(report: InsightReport) -> dict:
                 "version_distribution",
                 "activation_actions",
             )
-        },
+        }
+        | {"file_access_sessions": summary.get("file_access_sessions")},
         "narrative": generate_skill_sections(summary, coverage),
         "coverage": coverage,
         "sessions_analyzed": summary["present_sessions"],
@@ -150,9 +151,19 @@ def generate_skill_sections(summary: dict, coverage: dict) -> dict:
         conclusion = (
             "The skill was offered in processed, verified-present sessions, but those sessions do not establish "
             "whether its instructions entered context. No use conclusion can be drawn."
+            if not summary.get("file_access_sessions")
+            else "The skill was offered in processed, verified-present sessions. Native selection and confirmed "
+            "skill loads are not established; file access is reported separately below."
         )
     else:
         conclusion = "Skill-use evidence is unavailable for this cohort; no use conclusion can be drawn."
+    if summary.get("file_access_sessions"):
+        count = summary["file_access_sessions"]
+        conclusion += (
+            f" At least {count} {'session has' if count == 1 else 'sessions have'} a successful direct "
+            "SKILL.md read. This file access is separate from invocation and confirmed load; other read "
+            "forms and absent reads remain unknown."
+        )
     processed = coverage["projection"]["projection_complete_sessions"]
     return {
         "summary": conclusion,
@@ -163,6 +174,7 @@ def generate_skill_sections(summary: dict, coverage: dict) -> dict:
             "unconfirmed_load_attempts": summary["load_attempts"],
             "invoked": summary["invocations"],  # None: the harness records no invocation origin
             "instructions_supplied_inferred_sessions": summary.get("instructions_supplied_inferred_sessions"),
+            "file_access_sessions": summary.get("file_access_sessions"),
             "activated": summary["activation_actions"],  # configuration actions, not use
             "unknown": list(coverage["reasons"]),
         },

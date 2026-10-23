@@ -69,10 +69,16 @@ function SkillReport({ report }: { report: InsightReport }) {
           { label: "Invocations", value: <SkillCount value={metrics?.invoked_sessions} measured={availabilityMeasured} partial={coverage?.reasons.includes("invoked_not_recorded_on_some_harnesses")} /> },
           { label: "Offered", value: <SkillCount value={metrics?.available_sessions} measured={availabilityMeasured} partial={coverage?.reasons.includes("available_not_recorded_on_some_harnesses")} /> },
         ]}>
+          {metrics && "file_access_sessions" in metrics && (
+            <p className="max-w-[70ch] text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Skill file accessed: {metrics.file_access_sessions == null ? "Unknown (not zero)." : `At least ${metrics.file_access_sessions} ${metrics.file_access_sessions === 1 ? "session" : "sessions"}.`}</span>{" "}
+              Only successful direct reads of the exact verified project SKILL.md are included. This is not an invocation or confirmed skill load; other read forms and absent reads have no completeness proof or denominator.
+            </p>
+          )}
           {metrics?.instructions_supplied_inferred_sessions != null && (
             <p className="max-w-[70ch] text-sm text-muted-foreground">
               <span className="font-medium text-foreground">Instructions supplied (inferred): {metrics.instructions_supplied_inferred_sessions} {metrics.instructions_supplied_inferred_sessions === 1 ? "session" : "sessions"}.</span>{" "}
-              Native Codex project-skill selections only. These are the same invocations, not additional use or confirmed loads; manual file reads are not counted.
+              Native Codex project-skill selections only. These are the same invocations, not additional use or confirmed loads; manual file reads do not count toward inferred instruction supply.
             </p>
           )}
           {measured && !!metrics?.load_attempts && <p className="text-sm text-muted-foreground">{metrics.load_attempts} load {metrics.load_attempts === 1 ? "attempt" : "attempts"} failed or had no confirmed result, and {metrics.load_attempts === 1 ? "is" : "are"} not counted as {metrics.load_attempts === 1 ? "a load" : "loads"}.</p>}

@@ -111,6 +111,7 @@ test.describe("Component Insights report", () => {
       await expect(page.getByText("No session in this cohort has measurable skill-use evidence.", { exact: false })).toBeVisible();
       await expect(page.getByText("Being offered does not establish a skill load or an invocation.")).toBeVisible();
       await expect(page.getByText("Instructions supplied (inferred):", { exact: false })).toHaveCount(0);
+      await expect(page.getByText("Skill file accessed:", { exact: false })).toHaveCount(0); // old report has no field
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.screenshot({ path: testInfo.outputPath(`codex-availability-${name}.png`), fullPage: true });
     }
@@ -125,6 +126,7 @@ test.describe("Component Insights report", () => {
           present_sessions: 2, present_users: 1, available_sessions: 2,
           loaded_sessions: null, confirmed_loads: null, load_attempts: null,
           invoked_sessions: 1, invocations: 1, instructions_supplied_inferred_sessions: 1,
+          file_access_sessions: 1,
           harness_distribution: { codex: 2 }, version_distribution: { "1.0.0": 2 },
         },
         coverage: {
@@ -143,7 +145,10 @@ test.describe("Component Insights report", () => {
       const evidence = page.getByRole("region", { name: "Evidence" });
       await expect(evidence.getByText("Instructions supplied (inferred): 1 session.", { exact: false })).toBeVisible();
       await expect(evidence).toContainText("same invocations, not additional use or confirmed loads");
-      await expect(evidence).toContainText("manual file reads are not counted");
+      await expect(evidence).toContainText("manual file reads do not count toward inferred instruction supply");
+      await expect(evidence.getByText("Skill file accessed: At least 1 session.", { exact: false })).toBeVisible();
+      await expect(evidence).toContainText("This is not an invocation or confirmed skill load");
+      await expect(evidence).toContainText("other read forms and absent reads have no completeness proof or denominator");
       await expect(evidence).not.toContainText("followed");
       await expect(evidence.getByText("Not recorded", { exact: true })).toBeVisible();
       await expect(evidence.locator("dt").filter({ hasText: "Invocations" }).locator("..").locator("dd").first()).toHaveText("1");
