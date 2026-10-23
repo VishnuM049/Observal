@@ -36,6 +36,7 @@ def write_config(home: Path) -> None:
 def test_project_key_from_paths():
     assert project_key_from_cwd("/home/user/project") == "home-user-project"
     assert project_key_from_cwd("C:\\Users\\alice\\project") == "c-Users-alice-project"
+    assert project_key_from_cwd("/private/tmp/workspace.v1/repo.test") == "private-tmp-workspace-v1-repo-test"
 
 
 def test_find_cursor_jsonl_primary_and_fallback(tmp_path: Path):
@@ -92,6 +93,27 @@ def test_cursor_native_session_end_root_binds_only_matching_single_project(tmp_p
     outside.write_text(path.read_text())
     source = adapter.resolve_session_source({**event, "transcript_path": str(outside)}, home=home)
     assert source is not None and source.cwd == ""
+
+
+def test_cursor_native_dotted_project_root_binds_only_the_matching_transcript(tmp_path: Path):
+    home, project = tmp_path / "home", tmp_path / "workspace.v1" / "repo.test"
+    home.mkdir()
+    project.mkdir(parents=True)
+    key = project_key_from_cwd(str(project))
+    path = home / ".cursor/projects" / key / "agent-transcripts" / "session" / "session.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"role":"assistant","message":{"content":[]}}\n')
+    ensure_loaded()
+    adapter = get_adapter("cursor")
+    event = {"session_id": "session", "transcript_path": str(path), "workspace_roots": [str(project)]}
+    source = adapter.resolve_session_source(event, home=home)
+    assert source is not None and source.cwd == str(project)
+
+    other = home / ".cursor/projects/other/agent-transcripts/session/session.jsonl"
+    other.parent.mkdir(parents=True)
+    other.write_text(path.read_text())
+    unbound = adapter.resolve_session_source({**event, "transcript_path": str(other)}, home=home)
+    assert unbound is not None and unbound.cwd == ""
 
 
 def test_cursor_usage_is_a_parent_only_synthetic_record(tmp_path: Path):

@@ -21,7 +21,10 @@ def project_key_from_cwd(cwd: str) -> str:
          "/home/user/project" -> "home-user-project"
          "/mnt/c/Users/alice/proj" -> "mnt-c-Users-alice-proj"
     """
-    key = cwd.replace("\\", "-").replace("/", "-").replace(":", "")
+    # Cursor Agent 2026.10.14 also replaces dots in project directory names.
+    # Without this, its native transcript key disagrees with workspace_roots
+    # and a valid project pin is discarded as an unbound user-only snapshot.
+    key = cwd.replace("\\", "-").replace("/", "-").replace(".", "-").replace(":", "")
     key = key.lstrip("-")
     if len(key) > 1 and key[0].isupper() and key[1] == "-":
         key = key[0].lower() + key[1:]

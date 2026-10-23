@@ -29,7 +29,7 @@ _PRIVATE = "PRIVATE_SENTINEL_MUST_NOT_LEAVE_HOOK_MEMORY"
 
 @pytest.fixture
 def source_environment(tmp_path: Path) -> tuple[Path, Path, SessionSource, Callable[..., dict]]:
-    home, project = tmp_path / "home", tmp_path / "workspace"
+    home, project = tmp_path / "home", tmp_path / "workspace.v1"
     (home / ".observal").mkdir(parents=True, mode=0o700)
     (home / ".observal/config.json").write_text(
         json.dumps(
