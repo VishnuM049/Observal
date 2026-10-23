@@ -380,6 +380,31 @@ def test_codex_http_fetches_selected_version_transport_missing_from_listing_summ
     assert get.call_args_list[1].args[0] == f"/api/v1/mcps/{FIRST}/versions/0.1.0"
 
 
+def test_codex_tracked_http_uses_hidden_interactive_header_prompt(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp.client, "resolve_registry_reference", lambda *_args: FIRST)
+    listing = {
+        "id": FIRST,
+        "name": "HTTP Probe",
+        "namespace": "first",
+        "slug": "http-probe",
+        "url": "https://example.test/mcp",
+        "transport": "streamable-http",
+        "version": "0.1.0",
+        "headers": [{"name": "Authorization", "required": True}],
+    }
+    monkeypatch.setattr(mcp.client, "get", lambda *_args: listing)
+    hidden = Mock(return_value="inert-test-value")
+    monkeypatch.setattr(mcp, "password_input", hidden)
+    monkeypatch.setattr(mcp, "text_input", Mock(side_effect=AssertionError("header prompt must not echo")))
+    submitted = Mock(side_effect=RuntimeError("stop before writing config"))
+    monkeypatch.setattr(mcp.client, "post_public", submitted)
+    with pytest.raises(RuntimeError, match="stop before writing config"):
+        mcp._install_impl("first/http-probe", "codex", False, apply=True, directory=str(tmp_path), scope="user")
+    hidden.assert_called_once()
+    assert submitted.call_args.args[1]["header_values"] == {"Authorization": "inert-test-value"}
+    assert not (tmp_path / ".codex/config.toml").exists()
+
+
 def test_tracked_install_refuses_unsupported_harness_and_old_server(monkeypatch, tmp_path):
     with pytest.raises(CliError) as unsupported:
         mcp._install_impl("fixture", "pi", False, apply=True, scope="project", directory=str(tmp_path))

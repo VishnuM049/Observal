@@ -30,7 +30,7 @@ from observal_cli.analyzer import analyze_local
 from observal_cli.cmd_fork import fork_detail_rows
 from observal_cli.constants import VALID_HARNESSES, VALID_MCP_CATEGORIES
 from observal_cli.errors import ErrorCategory, fail, load_json_object
-from observal_cli.prompts import fuzzy_select, select_one, text_input
+from observal_cli.prompts import fuzzy_select, password_input, select_one, text_input
 from observal_cli.render import (
     OutputMode,
     console,
@@ -1236,7 +1236,10 @@ def _install_impl(
             else:
                 env_values[ev["name"]] = f"<{ev['name']}>"
 
-    # Prompt for headers (SSE/HTTP servers with auth)
+    # A tracked Codex HTTP header is a literal native-config value, potentially
+    # a credential. Do not echo it or add it to prompt history on interactive
+    # input. --header flags and raw snippet output are not secret-safe.
+    secure_http_headers = bool(apply and harness == "codex" and spec.get("url"))
     header_values: dict[str, str] = {}
     if header_list and not skip_prompts:
         required_headers = [h for h in header_list if h.get("required", True)]
@@ -1249,7 +1252,8 @@ def _install_impl(
                     rprint(f"  [green]✓[/green] {h['name']} [dim](from --header)[/dim]")
                 else:
                     desc = f" [dim]({h['description']})[/dim]" if h.get("description") else ""
-                    val = text_input(f"  {h['name']}{desc}")
+                    prompt = f"  {h['name']}{desc}"
+                    val = password_input(prompt) if secure_http_headers else text_input(prompt)
                     header_values[h["name"]] = val
         if optional_headers:
             rprint(f"\n[dim]{len(optional_headers)} optional header(s) available:[/dim]")
@@ -1259,7 +1263,8 @@ def _install_impl(
                     rprint(f"  [green]✓[/green] {h['name']} [dim](from --header)[/dim]")
                 else:
                     desc = f" [dim]({h['description']})[/dim]" if h.get("description") else ""
-                    val = text_input(f"  {h['name']}{desc} (press Enter to skip)", default="")
+                    prompt = f"  {h['name']}{desc} (press Enter to skip)"
+                    val = password_input(prompt) if secure_http_headers else text_input(prompt, default="")
                     if val:
                         header_values[h["name"]] = val
     elif header_list and skip_prompts:
@@ -1708,7 +1713,8 @@ def install(
 
     --apply requires --dir and --scope project|user. Codex also supports guarded
     streamable-HTTP URLs with native literal http_headers on tested CLI versions;
-    SSE, runtime-env header mapping and other HTTP options remain snippet-only.
+    credentials should be entered through the hidden interactive header prompt,
+    not --header (visible in shell history). Other HTTP auth forms are unsupported.
     A verified install is not proof of an executed call.
     Produces harness-specific configuration that you paste into your editor's
     MCP settings file. Prompts for required environment variables and
