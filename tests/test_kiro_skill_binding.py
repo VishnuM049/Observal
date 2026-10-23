@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from observal_cli.cmd_skill import install_skill_registry_direct
 from observal_cli.harness.kiro import KiroAdapter
 from observal_cli.layer import _skill_status, build_layer_manifest, skill_location_sha256
 from observal_shared.harness_registry import HARNESS_REGISTRY
-from services.session_parsers.skill_evidence import kind_recorded
+from services.session_parsers.skill_evidence import extract_skill_evidence, kind_recorded
 
 ALIAS = "triad-proof"
 CONTENT = "---\nname: triad-proof\ndescription: Inert triad proof.\n---\n\n# Safe\n"
@@ -114,6 +115,66 @@ def test_kiro_user_skill_path_and_nested_project_shadow(tmp_path, monkeypatch):
     shadow.write_text(CONTENT)
     assert _skill_status("kiro", "user", str(project), ALIAS, expected, {user_path: expected}) == "unverified"
     assert not kind_recorded("kiro", "load", "user")
+
+
+def test_kiro_v3_disclosure_cannot_be_promoted_without_cli_engine_provenance():
+    """V3 CLI and IDE use the same source envelope and sess_ ID namespace.
+
+    A native success with a matching visible file path is strong positive
+    disclosure evidence, but neither this source nor the Kiro delivery hook
+    records whether it came from CLI 2.33.1 V3 rather than the deferred IDE.
+    Do not opt the shared `kiro` harness into a measurable skill-use cell.
+    """
+    native = [
+        {"id": "start", "payload": {"type": "session_start", "agentType": "vibe"}},
+        {
+            "id": "call",
+            "payload": {
+                "type": "tool_call",
+                "toolName": "disclose_context",
+                "actionType": "disclose_context",
+                "toolCallId": "call-1",
+                "turnId": "turn-1",
+                "executionId": "execution-1",
+                "status": "completed",
+                "args": {"name": ALIAS},
+                "_meta": {
+                    "kiro": {
+                        "disclosedContext": {
+                            "type": "skill",
+                            "displayName": ALIAS,
+                            "uri": f"file:///work/.kiro/skills/{ALIAS}/SKILL.md",
+                        }
+                    }
+                },
+            },
+        },
+        {
+            "id": "result",
+            "payload": {
+                "type": "tool_result",
+                "toolCallId": "call-1",
+                "turnId": "turn-1",
+                "executionId": "execution-1",
+                "success": True,
+                "content": ["PRIVATE_TEST_INSTRUCTIONS"],
+            },
+        },
+    ]
+    rows = [
+        {
+            "line_offset": offset,
+            "is_source_record": 1,
+            "layer_hash": "v2_" + "a" * 60,
+            "raw_line": json.dumps(record),
+        }
+        for offset, record in enumerate(native)
+    ]
+    result = extract_skill_evidence("kiro", rows)
+    assert result.status == "unsupported" and result.evidence == ()
+    assert not kind_recorded("kiro", "load", "project")
+    assert not kind_recorded("kiro", "load", "user")
+    assert "PRIVATE_TEST_INSTRUCTIONS" not in str(result)
 
 
 def test_relocated_kiro_profile_cannot_claim_fixed_layer_location(tmp_path, monkeypatch):
