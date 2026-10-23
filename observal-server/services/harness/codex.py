@@ -50,11 +50,12 @@ class CodexAdapter(BaseHarnessAdapter):
         return "codex"
 
     def format_hook_install_snippet(self, event: str, handler_type: str, command: str, timeout: int | None) -> dict:
-        return {
-            "hooks": {event: {"command": command}},
-            "_format": "toml",
-            "_note": f"Add to .codex/config.toml under [hooks.{event}]",
-        }
+        # The registry installer writes .codex/hooks.json matcher groups, not
+        # TOML [hooks.<event>] objects. Installation does not prove execution.
+        hook: dict = {"type": "command", "command": command}
+        if timeout is not None:
+            hook["timeout"] = timeout
+        return {"hooks": {event: [{"matcher": "", "hooks": [hook]}]}}
 
     def format_mcp_config(self, ctx: McpConfigContext) -> dict:
         if ctx.url:

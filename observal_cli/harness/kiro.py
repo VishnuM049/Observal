@@ -147,6 +147,49 @@ class KiroAdapter(BaseAdapter):
     def harness_name(self) -> str:
         return "kiro"
 
+    @staticmethod
+    def _canonical_profile() -> bool:
+        import os
+
+        home = Path.home() / ".kiro"
+        # A relocated profile is outside the layer's fixed user: path table.
+        return Path(os.environ.get("KIRO_HOME", home)).resolve() == home.resolve()
+
+    def skill_manifest_path(self, scope: str, alias: str) -> str | None:
+        if not self._canonical_profile():
+            return None
+        return {
+            "project": f"project:.kiro/skills/{alias}/SKILL.md",
+            "user": f"user:skills/{alias}/SKILL.md",
+        }.get(scope)
+
+    def skill_location(self, scope: str, directory: str | None, alias: str) -> str | None:
+        if not self._canonical_profile():
+            return None
+        # Native V3 records the *visible* .kiro/skills path even when the
+        # project installer symlinks it to .agents/skills. Do not resolve that
+        # final link: Cursor records the opposite location for its symlinks.
+        if scope == "project" and directory:
+            return str(Path(directory).resolve() / ".kiro" / "skills" / alias / "SKILL.md")
+        if scope == "user":
+            return str(Path.home().resolve() / ".kiro" / "skills" / alias / "SKILL.md")
+        return None
+
+    def skill_shadow_paths(self, scope: str, directory: str | None, alias: str) -> list[Path]:
+        if scope not in {"project", "user"} or not directory:
+            return []
+        root = Path(directory).resolve()
+        project = root / ".kiro" / "skills" / alias / "SKILL.md"
+        user = Path.home() / ".kiro" / "skills" / alias / "SKILL.md"
+        # A same-named skill in either scope or an ancestor workspace could
+        # win discovery. Its contents need not differ to make it ambiguous.
+        active = project if scope == "project" else user
+        candidates = [
+            user if scope == "project" else project,
+            *(parent / ".kiro" / "skills" / alias / "SKILL.md" for parent in root.parents),
+        ]
+        return [path for path in dict.fromkeys(candidates) if path != active]
+
     def redact_layer_content(self, display_path: str) -> bool:
         # Shared MCP settings can contain credentials. Publish hashes, never file bytes.
         return display_path in {"user:settings/mcp.json", "project:.kiro/settings/mcp.json"}

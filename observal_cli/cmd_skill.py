@@ -1552,7 +1552,7 @@ _USER_SKILL_DIRS: dict[str, str] = {
     "claude-code": "~/.claude/skills",
     "kiro": "~/.kiro/skills",
     "opencode": "~/.config/opencode/skills",
-    "cursor": "~/.cursor/rules",
+    "cursor": "~/.cursor/skills",
     "copilot": "~/.copilot/skills",
     "pi": "~/.pi/agent/skills",
 }

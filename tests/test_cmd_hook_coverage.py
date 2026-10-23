@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from contextlib import nullcontext
-from unittest.mock import Mock, call
+from unittest.mock import MagicMock, Mock, call
 
 import pytest
 import typer
@@ -657,6 +657,52 @@ def test_install_writes_safe_files_config_and_lock_entry(tmp_path, monkeypatch):
         # Not the nested Claude Code hook shape, so the install stays unbound (unverified).
         hook_binding=None,
     )
+
+
+def test_codex_registry_hook_install_accepts_native_matcher_arrays(tmp_path, monkeypatch):
+    from services.hook_install_generator import generate_hook_install_config
+
+    project = tmp_path / "project"
+    hooks_file = project / ".codex" / "hooks.json"
+    hooks_file.parent.mkdir(parents=True)
+    hooks_file.write_text(json.dumps({"hooks": {"Stop": [{"matcher": "", "hooks": []}]}}))
+    listing = MagicMock(
+        name="guard",
+        event="PreToolUse",
+        handler_type="command",
+        handler_config={"command": "python guard.py", "timeout": 10},
+        script_content="print('safe fixture')\n",
+        script_filename="guard.py",
+        source_url=None,
+        source_path=None,
+        source_ref=None,
+        resolved_sha=None,
+        requirements=[],
+    )
+    listing.name = "guard"
+    generated = generate_hook_install_config(listing, "codex")
+    assert generated["config_path"] == ".codex/hooks.json"
+    monkeypatch.setattr(hook.client, "resolve_registry_reference", Mock(return_value="resolved"))
+    monkeypatch.setattr(hook.client, "get", Mock(return_value=_hook_item()))
+    monkeypatch.setattr(hook.client, "post", Mock(return_value=generated))
+
+    installed = runner.invoke(
+        app, ["registry", "hook", "install", "guard", "--harness", "codex", "--dir", str(project)]
+    )
+    assert installed.exit_code == 0, installed.output
+    merged = json.loads(hooks_file.read_text())
+    assert merged["hooks"]["Stop"] == [{"matcher": "", "hooks": []}]
+    groups = merged["hooks"]["PreToolUse"]
+    assert groups == [
+        {
+            "matcher": "",
+            "hooks": [{"type": "command", "command": ".codex/hooks/guard.py", "timeout": 10}],
+        }
+    ]
+    assert (project / ".codex" / "hooks" / "guard.py").is_file()
+    # Format and installation work, but hook execution/registry binding do not
+    # become verified through this response alone.
+    assert lockfile.upsert_standalone.call_args.kwargs["hook_binding"] is None
 
 
 def test_install_merges_existing_config_and_rejects_invalid_json(tmp_path, monkeypatch):

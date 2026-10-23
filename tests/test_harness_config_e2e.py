@@ -1412,9 +1412,11 @@ class TestMcpAuthHeadersInAgentPull:
         (
             "codex",
             {
-                "hooks": {"PreToolUse": {"command": "python guard.py"}},
-                "_format": "toml",
-                "_note": "Add to .codex/config.toml under [hooks.PreToolUse]",
+                "hooks": {
+                    "PreToolUse": [
+                        {"matcher": "", "hooks": [{"type": "command", "command": "python guard.py", "timeout": 10}]}
+                    ]
+                }
             },
         ),
     ],

@@ -44,6 +44,44 @@ class CursorAdapter(BaseAdapter):
     def harness_name(self) -> str:
         return "cursor"
 
+    def skill_manifest_path(self, scope: str, alias: str) -> str | None:
+        return {
+            "project": f"project:.cursor/skills/{alias}/SKILL.md",
+            "user": f"user:skills/{alias}/SKILL.md",
+        }.get(scope)
+
+    def skill_location(self, scope: str, directory: str | None, alias: str) -> str | None:
+        if scope == "project" and directory:
+            file = Path(directory).resolve() / ".cursor" / "skills" / alias / "SKILL.md"
+        elif scope == "user":
+            file = Path.home() / ".cursor" / "skills" / alias / "SKILL.md"
+        else:
+            return None
+        # Native Cursor resolves a project .cursor/skills symlink to its
+        # canonical .agents/skills file in the expanded user message. Unlike
+        # Kiro V3, the symlink display path is not the recorded location.
+        return str(file.resolve())
+
+    def skill_shadow_paths(self, scope: str, directory: str | None, alias: str) -> list[Path]:
+        if scope not in {"project", "user"} or not directory:
+            return []
+        project, home = Path(directory).resolve(), Path.home()
+        active_path = (
+            project / ".cursor" / "skills" / alias / "SKILL.md"
+            if scope == "project"
+            else home / ".cursor" / "skills" / alias / "SKILL.md"
+        ).resolve()
+        roots = [project, home, *project.parents]
+        candidates = [
+            root / folder / "skills" / alias / "SKILL.md"
+            for root in roots
+            for folder in (".cursor", ".agents", ".claude", ".codex")
+        ]
+        # The installer creates .agents/skills with a .cursor/skills symlink.
+        # It is one skill, not a shadow. A *different* same-named file in any
+        # native discovery root is ambiguous even if its bytes are identical.
+        return [path for path in candidates if path.resolve() != active_path]
+
     def redact_layer_content(self, display_path: str) -> bool:
         # Shared MCP settings may hold env values and HTTP authorization headers.
         return display_path in {"user:mcp.json", "project:.cursor/mcp.json"}

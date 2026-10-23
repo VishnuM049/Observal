@@ -1624,8 +1624,8 @@ def test_skill_edit_json_returns_server_result(monkeypatch):
     "arguments",
     [
         ["list", "--task-type", "coding"],
-        ["list", "--harness", "cursor"],
-        ["install", "review", "--harness", "cursor"],
+        ["list", "--harness", "not-a-harness"],
+        ["install", "review", "--harness", "not-a-harness"],
         ["install", "review", "--harness", "pi", "--scope", "invalid"],
         ["install", "review", "--harness", "pi", "--raw", "--output", "json"],
     ],

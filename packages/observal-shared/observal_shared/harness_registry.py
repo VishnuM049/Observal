@@ -48,7 +48,7 @@ HARNESS_RUNTIME_FACT_KEYS: tuple[str, ...] = (
 HARNESS_REGISTRY: dict[str, dict] = {
     "cursor": {
         "display_name": "Cursor",
-        "capabilities": {"hooks", "mcp_servers"},
+        "capabilities": {"hooks", "mcp_servers", "skills"},
         "session_parser": "cursor",
         "scopes": ["project", "user"],
         "default_scope": "project",
@@ -94,7 +94,7 @@ HARNESS_REGISTRY: dict[str, dict] = {
     },
     "kiro": {
         "display_name": "Kiro",
-        "capabilities": {"hooks", "mcp_servers"},
+        "capabilities": {"hooks", "mcp_servers", "skills"},
         "session_parser": "kiro",
         "scopes": ["project", "user"],
         "default_scope": "user",

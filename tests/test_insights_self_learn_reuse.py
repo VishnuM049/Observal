@@ -550,9 +550,9 @@ async def test_capabilities_are_recomputed_for_linked_components(db: AsyncSessio
 
     version = await _new_version(db, agent)
     assert "skills" in version.required_capabilities
-    # cursor has no `skills` capability, so it must drop out of the inferred set.
-    assert "cursor" not in version.inferred_supported_harnesses
-    assert "claude-code" in version.inferred_supported_harnesses
+    # Cursor and Kiro now install native skills. Capability inference is an
+    # installation claim, not evidence that any session activated a skill.
+    assert {"cursor", "kiro", "claude-code"}.issubset(version.inferred_supported_harnesses)
 
 
 @pytest.mark.asyncio
