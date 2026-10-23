@@ -17,6 +17,8 @@ from services.session_parsers.codex_mcp_invocations import CodexMCPInvocationExt
 from services.session_parsers.invocations import extract_invocations
 
 _FIXTURE = Path(__file__).parent / "fixtures/component_insights/codex/mcp_completed.jsonl"
+# Structurally derived from the 0.163.0 native executed-error control; the body is synthetic.
+_ERROR_FIXTURE = Path(__file__).parent / "fixtures/component_insights/codex/mcp_executed_error.jsonl"
 _HASH = "v2_" + "a" * 60
 _CANDIDATE = {
     "local_name": "matrix-mcp-probe",
@@ -41,6 +43,10 @@ def _rows(*lines: dict) -> list[dict]:
 
 def _fixture() -> tuple[dict, dict]:
     return tuple(json.loads(line) for line in _FIXTURE.read_text().splitlines())
+
+
+def _error_fixture() -> tuple[dict, dict]:
+    return tuple(json.loads(line) for line in _ERROR_FIXTURE.read_text().splitlines())
 
 
 def _source(*lines: dict) -> list[dict]:
@@ -88,6 +94,24 @@ def test_completed_native_item_has_harness_server_identity_without_arguments_or_
     assert not collision.rows and collision.collision_count == 1
 
 
+def test_native_executed_error_is_attributed_without_leaking_its_result_body():
+    meta, error = _error_fixture()
+    extracted = extract_invocations("codex", _rows(meta, error))
+    assert extracted.status == "supported" and len(extracted.invocations) == 1
+    call = extracted.invocations[0]
+    assert (call.mcp_server, call.tool_name, call.tool_use_id, call.result_state) == (
+        "matrix-mcp-probe",
+        "ping_fail",
+        "call_error_001",
+        "error",
+    )
+    matched = match_invocations(extracted.invocations, {_HASH: [_CANDIDATE]}, {1: _HASH})
+    assert len(matched.rows) == 1 and matched.rows[0]["result_state"] == "error"
+    assert "SANITIZED_TEST_ERROR_BODY" not in str(extracted)
+    assert "SANITIZED_TEST_ERROR_BODY" not in str(matched)
+    assert match_invocations(extracted.invocations, {_HASH: [_CANDIDATE, _CANDIDATE]}, {1: _HASH}).rows == ()
+
+
 def test_no_tool_is_supported_but_denied_or_incomplete_call_is_not_measured_zero():
     meta, event = _fixture()
     extractor = CodexMCPInvocationExtractor()
@@ -98,6 +122,8 @@ def test_no_tool_is_supported_but_denied_or_incomplete_call_is_not_measured_zero
         {"status": "failed", "result": None},  # approval denied: no server execution
         {"status": "completed", "result": {}},
         {"status": "completed", "result": {"isError": "false"}},
+        {"status": "failed", "result": {"isError": False}},  # contradictory native outcome
+        {"status": "completed", "result": {"isError": True}},  # not the observed error shape
         {"server": ""},
         {"tool": ""},
         {"id": None},
@@ -105,9 +131,14 @@ def test_no_tool_is_supported_but_denied_or_incomplete_call_is_not_measured_zero
         changed = json.loads(json.dumps(event))
         changed["payload"]["item"].update(replacement)
         assert extractor.extract(_rows(meta, changed)).status == "unsupported"
-    failed = json.loads(json.dumps(event))
-    failed["payload"]["item"]["result"]["isError"] = True
-    assert extractor.extract(_rows(meta, failed)).invocations[0].result_state == "error"
+    error = _error_fixture()[1]
+    assert extractor.extract(_rows(meta, error)).invocations[0].result_state == "error"
+    # A denied call anywhere in a mixed session prevents a misleading complete denominator.
+    assert extractor.extract(_rows(meta, event, error)).status == "supported"
+    denied = json.loads(json.dumps(error))
+    denied["payload"]["item"].update({"id": "call_denied", "result": None})
+    assert extractor.extract(_rows(meta, event, denied)).status == "unsupported"
+    assert extractor.extract(_rows(meta, error, error)).status == "unsupported"
     for bad_time in (None, "not-a-date", "2100-01-01T00:00:00Z"):
         untimed = json.loads(json.dumps(event))
         untimed["timestamp"] = bad_time
@@ -147,6 +178,16 @@ async def test_scoped_codex_projection_publishes_only_executed_verified_calls(mo
     assert activity[0]["attribution_method"] == "verified_server"
     assert activity[0]["result_state"] == "success" and activity[0]["tool_name"] == "ping"
     assert "arguments" not in activity[0] and "result" not in activity[0]
+
+    writes.clear()
+    error = _error_fixture()[1]
+    rows[:] = _source(meta, error)
+    executed_error = await mcp_projector.project_session_activity("p", "u", "codex", "s-error")
+    assert executed_error["status"] == "complete"
+    assert executed_error["candidate_count"] == executed_error["attributed_count"] == 1
+    activity = [row for sql, row in writes if "INSERT INTO component_activity " in sql]
+    assert len(activity) == 1 and activity[0]["result_state"] == "error"
+    assert "SANITIZED_TEST_ERROR_BODY" not in str(writes)
 
     writes.clear()
     rows[:] = _source(meta)

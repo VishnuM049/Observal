@@ -4,10 +4,11 @@
 """Codex CLI 0.163.0 MCP calls from native item-completed records only.
 
 Native ``event_msg`` items identify the configured server, tool, completion
-status and explicit MCP result error flag. Model-generated function calls,
+status and explicit MCP result error flag. An executed tool error has status
+``failed`` with a non-null result whose ``isError`` is true. A denied approval
+also has status ``failed`` but no result: decline the entire session rather
+than reporting it as a use or measured zero. Model-generated function calls,
 code-mode text, prompts, arguments and result bodies are not identity evidence.
-A denied approval has status ``failed`` but never executed the server: decline
-the entire session rather than reporting it as a use or measured zero.
 """
 
 from __future__ import annotations
@@ -93,8 +94,8 @@ class CodexMCPInvocationExtractor:
                     # A new lifecycle form needs its own controlled native run.
                     ambiguous = True
                 continue
-            # A missing result, duplicate/invalid id, or a declined permission
-            # cannot supply a completed attributable call or a zero-use session.
+            # An executed error has failed status AND an explicit error result.
+            # A declined permission has no result and cannot supply a call or zero.
             server, tool, call_id = item.get("server"), item.get("tool"), item.get("id")
             result = item.get("result")
             if (
@@ -105,9 +106,9 @@ class CodexMCPInvocationExtractor:
                 or not isinstance(call_id, str)
                 or not _ID.fullmatch(call_id)
                 or call_id in ids
-                or item.get("status") != "completed"
                 or not isinstance(result, dict)
                 or type(result.get("isError")) is not bool
+                or (item.get("status"), result["isError"]) not in (("completed", False), ("failed", True))
             ):
                 ambiguous = True
                 continue
