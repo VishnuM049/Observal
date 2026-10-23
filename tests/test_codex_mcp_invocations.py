@@ -203,11 +203,24 @@ async def test_scoped_codex_projection_publishes_only_executed_verified_calls(mo
     assert not any("INSERT INTO component_activity" in sql for sql, _ in writes)
 
 
+@pytest.mark.parametrize("version", ["0.163.0", "0.164.0"])
+def test_tested_native_version_supports_both_success_and_executed_error(version):
+    meta, success = _fixture()
+    _unused, error = _error_fixture()
+    meta["payload"]["cli_version"] = version
+    extracted = extract_invocations("codex", _rows(meta, success, error))
+    assert extracted.status == "supported"
+    assert [call.result_state for call in extracted.invocations] == ["success", "error"]
+    denied = json.loads(json.dumps(error))
+    denied["payload"]["item"].update({"result": None, "id": "call_denied"})
+    assert extract_invocations("codex", _rows(meta, success, denied)).status == "unsupported"
+
+
 def test_only_native_item_completed_and_exact_tested_version_are_supported():
     meta, event = _fixture()
     extractor = CodexMCPInvocationExtractor()
     for record in (
-        {**meta, "payload": {**meta["payload"], "cli_version": "0.164.0"}},
+        {**meta, "payload": {**meta["payload"], "cli_version": "0.165.0"}},
         {**meta, "payload": {**meta["payload"], "cwd": "relative/path"}},
     ):
         assert extractor.extract(_rows(record, event)).status == "unsupported"

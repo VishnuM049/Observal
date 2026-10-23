@@ -14,6 +14,10 @@ from services.harness import BaseHarnessAdapter, ConfigContext, McpConfigContext
 _CODEX_SESSION_PUSH_CMD = "python3 -m observal_cli.hooks.codex_session_push"
 
 
+class CodexHttpEnvUnsupportedError(ValueError):
+    """The registry has values, not the runtime header-to-env mapping Codex needs."""
+
+
 def _toml_string(value: str) -> str:
     return json.dumps(value)
 
@@ -59,11 +63,16 @@ class CodexAdapter(BaseHarnessAdapter):
 
     def format_mcp_config(self, ctx: McpConfigContext) -> dict:
         if ctx.url:
+            if ctx.server_env:
+                # This context has env *values*, but Codex HTTP requires a
+                # header-to-runtime-env-name mapping. Never silently drop them
+                # or put stdio `env` into an HTTP server's config.
+                raise CodexHttpEnvUnsupportedError(
+                    "Codex HTTP MCP environment values require an explicit header-to-env mapping"
+                )
             entry: dict = {"url": ctx.url}
             if ctx.headers:
-                entry["headers"] = ctx.headers
-            if ctx.server_env:
-                entry["env"] = ctx.server_env
+                entry["http_headers"] = ctx.headers
         else:
             entry = ctx.standard_entry()
         return {"mcp_servers": {ctx.name: entry}}

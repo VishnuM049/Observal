@@ -325,6 +325,61 @@ def test_tracked_install_cli_flags_validate_before_network(monkeypatch, tmp_path
     assert "Tracked install requires a supported harness" in outcome.output
 
 
+@pytest.mark.parametrize("transport", ["sse", "", None])
+def test_codex_tracked_http_refuses_unproven_transport_before_install(monkeypatch, tmp_path, transport):
+    monkeypatch.setattr(mcp.client, "resolve_registry_reference", lambda *_args: FIRST)
+    monkeypatch.setattr(
+        mcp.client,
+        "get",
+        lambda *_args: {
+            "id": FIRST,
+            "name": "HTTP Probe",
+            "namespace": "first",
+            "slug": "http-probe",
+            "url": "https://example.test/mcp",
+            "transport": transport,
+            "version": "0.1.0",
+        },
+    )
+    written = Mock(side_effect=AssertionError("no install API request or write is allowed"))
+    monkeypatch.setattr(mcp.client, "post_public", written)
+    with pytest.raises(CliError) as refused:
+        mcp._install_impl(
+            "first/http-probe", "codex", False, apply=True, no_prompt=True, directory=str(tmp_path), scope="user"
+        )
+    assert refused.value.category is ErrorCategory.VALIDATION
+    written.assert_not_called()
+    assert not (tmp_path / ".codex/config.toml").exists()
+
+
+def test_codex_http_fetches_selected_version_transport_missing_from_listing_summary(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp.client, "resolve_registry_reference", lambda *_args: FIRST)
+    get = Mock(
+        side_effect=[
+            {
+                "id": FIRST,
+                "name": "HTTP Probe",
+                "namespace": "first",
+                "slug": "http-probe",
+                "version": "0.1.0",
+                "url": "https://example.test/mcp",
+            },
+            {"version": "0.1.0", "url": "https://example.test/mcp", "transport": "sse"},
+        ]
+    )
+    monkeypatch.setattr(mcp.client, "get", get)
+    monkeypatch.setattr(
+        mcp.client, "post_public", Mock(side_effect=AssertionError("not an installable HTTP transport"))
+    )
+    with pytest.raises(CliError) as refused:
+        mcp._install_impl(
+            "first/http-probe", "codex", False, apply=True, no_prompt=True, directory=str(tmp_path), scope="user"
+        )
+    assert refused.value.category is ErrorCategory.VALIDATION
+    assert get.call_count == 2
+    assert get.call_args_list[1].args[0] == f"/api/v1/mcps/{FIRST}/versions/0.1.0"
+
+
 def test_tracked_install_refuses_unsupported_harness_and_old_server(monkeypatch, tmp_path):
     with pytest.raises(CliError) as unsupported:
         mcp._install_impl("fixture", "pi", False, apply=True, scope="project", directory=str(tmp_path))

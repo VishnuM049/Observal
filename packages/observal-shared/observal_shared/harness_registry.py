@@ -203,9 +203,11 @@ HARNESS_REGISTRY: dict[str, dict] = {
         "display_name": "Codex",
         "capabilities": {"mcp_servers", "hooks", "skills"},
         "session_parser": "codex",
-        # Codex 0.163.0 emits item_completed McpToolCall with native server,
-        # tool, status and explicit isError. Failed approvals are unsupported.
+        # Tested 0.163.0 and 0.164.0 CLI sessions emit item_completed
+        # McpToolCall with native server, tool, status and explicit isError.
+        # Failed calls without a result remain unsupported.
         "invocation_extractor": "codex",
+        "mcp_native_tested_versions": ("0.163.0", "0.164.0"),
         # Codex 0.163.0 writes a developer skills listing with rooted SKILL.md
         # locations. Only a verified, unshadowed project install can match it;
         # neither a $name expansion nor a mention establishes invocation/load.

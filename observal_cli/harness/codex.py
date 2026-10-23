@@ -72,13 +72,22 @@ class CodexAdapter(BaseAdapter):
         return {"user": "user:config.toml", "project": "project:.codex/config.toml"}.get(scope)
 
     def configure_tracked_mcp(self, scope: str, directory: str, alias: str, snippet: dict) -> McpConfigUndo:
-        from .mcp_binding import install_toml_mcp, native_mcp_version, stdio_install_entry
+        from observal_shared.harness_registry import HARNESS_REGISTRY
 
-        if native_mcp_version("codex") != "codex-cli 0.163.0":
-            raise ValueError("Tracked Codex install requires the tested 0.163.0 runtime")
+        from .mcp_binding import codex_http_install_entry, install_toml_mcp, native_mcp_version, stdio_install_entry
+
+        tested = HARNESS_REGISTRY["codex"]["mcp_native_tested_versions"]
+        if native_mcp_version("codex") not in {f"codex-cli {version}" for version in tested}:
+            raise ValueError("Tracked Codex install requires the tested MCP runtime")
         if self.read_installed_mcp(scope, directory, alias)[0] != "missing":
             raise ValueError("Codex MCP alias is untrusted, configured or ambiguous")
-        entry = stdio_install_entry(snippet, "mcp_servers", alias)
+        servers = snippet.get("mcp_servers") if isinstance(snippet, dict) else None
+        selected = servers.get(alias) if isinstance(servers, dict) else None
+        entry = (
+            codex_http_install_entry(snippet, alias)
+            if isinstance(selected, dict) and "url" in selected
+            else stdio_install_entry(snippet, "mcp_servers", alias)
+        )
         root = Path(directory).resolve() / ".codex" if scope == "project" else Path.home() / ".codex"
         return install_toml_mcp(root / "config.toml", alias, entry)
 
@@ -86,7 +95,7 @@ class CodexAdapter(BaseAdapter):
         import os
         import tomllib
 
-        from .mcp_binding import read_toml_mcp
+        from .mcp_binding import codex_http_install_entry, read_toml_mcp
 
         if scope not in {"user", "project"} or not directory:
             return "unverified", None
@@ -101,8 +110,13 @@ class CodexAdapter(BaseAdapter):
         shadow, _ = read_toml_mcp(other, alias)
         if shadow != "missing":
             return "unverified", None
+        if status == "verified" and entry is not None and "url" in entry:
+            try:
+                codex_http_install_entry({"mcp_servers": {alias: entry}}, alias)
+            except ValueError:
+                return "unverified", None
         if scope == "project":
-            # Codex 0.163.0 ignored an untrusted project's config in a native
+            # Tested Codex runtimes ignore an untrusted project's config in a native
             # exec control. A present file is not proof that Codex loaded it.
             try:
                 user = tomllib.loads(user_path.read_text(encoding="utf-8"))

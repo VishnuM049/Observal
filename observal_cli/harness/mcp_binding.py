@@ -11,6 +11,7 @@ import subprocess
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 def _entry(entry: object) -> bool:
@@ -117,6 +118,46 @@ def stdio_install_entry(snippet: object, key: str, alias: str) -> dict:
     return entry
 
 
+def codex_http_install_entry(snippet: object, alias: str) -> dict:
+    """Track only a direct streamable-HTTP URL and literal header values.
+
+    Codex uses `http_headers`, not JSON MCP `headers` or stdio `env`.
+    Env-name mapping, bearer auth and URL-embedded secrets need separate
+    native controls; never record an unsupported configuration as verified.
+    """
+    if not isinstance(snippet, dict) or set(snippet) != {"mcp_servers"}:
+        raise ValueError("Expected one generated Codex MCP config block")
+    servers = snippet["mcp_servers"]
+    if not isinstance(servers, dict) or set(servers) != {alias}:
+        raise ValueError("Generated Codex MCP alias is ambiguous")
+    entry = servers[alias]
+    if not isinstance(entry, dict) or set(entry) - {"url", "http_headers"}:
+        raise ValueError("Unsupported Codex HTTP MCP options")
+    url, headers = entry.get("url"), entry.get("http_headers", {})
+    if (
+        not isinstance(url, str)
+        or not isinstance(headers, dict)
+        or any(not isinstance(k, str) or not k or not isinstance(v, str) or not v for k, v in headers.items())
+    ):
+        raise ValueError("Invalid Codex HTTP MCP URL or headers")
+    try:
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or (parsed.port is not None and not 0 < parsed.port <= 65535)
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or any(char.isspace() for char in url)
+        ):
+            raise ValueError("Codex HTTP URL requires an uncredentialed endpoint")
+    except ValueError as exc:
+        raise ValueError("Codex HTTP URL requires an uncredentialed endpoint") from exc
+    return entry
+
+
 def _require_regular_target(path: Path) -> None:
     # Refuse redirection through a settings directory or the final config.
     if any(part.is_symlink() for part in (path, path.parent, path.parent.parent)):
@@ -206,11 +247,19 @@ def install_toml_mcp(path: Path, alias: str, entry: dict) -> McpConfigUndo:
         # JSON basic strings are valid TOML basic strings; preserve all existing
         # Codex settings/comments by appending one verified table at the end.
         quote = lambda value: json.dumps(value, ensure_ascii=False)  # noqa: E731
-        lines = [f"[mcp_servers.{quote(alias)}]", f"command = {quote(entry['command'])}"]
-        lines.append("args = [" + ", ".join(quote(arg) for arg in entry.get("args", [])) + "]")
-        if entry.get("env"):
-            lines.extend(["", f"[mcp_servers.{quote(alias)}.env]"])
-            lines.extend(f"{quote(k)} = {quote(v)}" for k, v in entry["env"].items())
+        lines = [f"[mcp_servers.{quote(alias)}]"]
+        if "url" in entry:
+            codex_http_install_entry({"mcp_servers": {alias: entry}}, alias)
+            lines.append(f"url = {quote(entry['url'])}")
+            if entry.get("http_headers"):
+                lines.extend(["", f"[mcp_servers.{quote(alias)}.http_headers]"])
+                lines.extend(f"{quote(k)} = {quote(v)}" for k, v in entry["http_headers"].items())
+        else:
+            lines.append(f"command = {quote(entry['command'])}")
+            lines.append("args = [" + ", ".join(quote(arg) for arg in entry.get("args", [])) + "]")
+            if entry.get("env"):
+                lines.extend(["", f"[mcp_servers.{quote(alias)}.env]"])
+                lines.extend(f"{quote(k)} = {quote(v)}" for k, v in entry["env"].items())
         new_content = original.rstrip() + "\n\n" + "\n".join(lines) + "\n"
         try:
             tomllib.loads(new_content)

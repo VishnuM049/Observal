@@ -1086,6 +1086,11 @@ def mcp_entry_fingerprint(entry: dict) -> str:
             authority = f"{authority}:{parsed.port}"
         safe_url = urlunsplit((parsed.scheme, authority, parsed.path, "", ""))
     structure = [entry.get("command", ""), entry.get("args", []), safe_url, entry.get("type", "")]
+    if "http_headers" in entry:
+        # Only Codex native HTTP entries use this key. Do not change existing
+        # fingerprints for URL-only installations in other harnesses.
+        # Auth changes must invalidate the pin; upload only this digest.
+        structure.append(entry["http_headers"])
     return (
         "sha256-"
         + hashlib.sha256(

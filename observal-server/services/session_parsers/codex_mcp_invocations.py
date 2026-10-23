@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Observal Contributors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Codex CLI 0.163.0 MCP calls from native item-completed records only.
+"""Tested Codex CLI MCP calls from native item-completed records only.
 
 Native ``event_msg`` items identify the configured server, tool, completion
 status and explicit MCP result error flag. An executed tool error has status
@@ -18,13 +18,15 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from observal_shared.harness_registry import HARNESS_REGISTRY
+
 from .base import load_line
 from .invocation_types import InvocationExtraction, SourceInvocation
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-_TESTED_VERSION = "0.163.0"
+_TESTED_VERSIONS = frozenset(HARNESS_REGISTRY["codex"]["mcp_native_tested_versions"])
 _ALIAS = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _TOOL = re.compile(r"[A-Za-z0-9_.-]{1,256}\Z")
 _ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
@@ -134,7 +136,7 @@ class CodexMCPInvocationExtractor:
             or ambiguous
             or pending
             or len(metas) != 1
-            or metas[0].get("cli_version") != _TESTED_VERSION
+            or metas[0].get("cli_version") not in _TESTED_VERSIONS
             or not isinstance(metas[0].get("cwd"), str)
             or not metas[0]["cwd"].startswith("/")
             or posixpath.normpath(metas[0]["cwd"]) != metas[0]["cwd"]

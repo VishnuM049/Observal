@@ -1268,6 +1268,20 @@ class TestConfigGeneratorCodexFormat:
         entry = next(iter(cfg["mcp_servers"].values()))
         assert entry["url"] == "https://example.com/mcp"
 
+    def test_codex_http_snippet_uses_native_header_key_without_stdio_env(self):
+        from services.config_generator import generate_config
+
+        listing = self._make_listing(url="https://example.test/mcp")
+        listing.transport = "streamable-http"
+        config = generate_config(listing, "codex", header_values={"X-Control": "inert"})
+        entry = next(iter(config["mcp_servers"].values()))
+        assert entry == {"url": "https://example.test/mcp", "http_headers": {"X-Control": "inert"}}
+        listing.environment_variables = [{"name": "TOKEN"}]
+        from services.harness.codex import CodexHttpEnvUnsupportedError
+
+        with pytest.raises(CodexHttpEnvUnsupportedError):
+            generate_config(listing, "codex", env_values={"TOKEN": "never-rendered"})
+
     def test_mcp_servers_toml_renders_correctly(self):
         """The mcp_servers dict should produce valid Codex TOML."""
         from observal_cli.cmd_pull import _dict_to_toml

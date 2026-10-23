@@ -1140,10 +1140,23 @@ def _install_impl(
     fetch_context = nullcontext() if machine_output else spinner("Fetching server details...")
     with fetch_context:
         listing = client.get(f"/api/v1/mcps/{resolved}")
-        # Required inputs come from the version that will be installed, not the latest listing.
-        spec = client.get(f"/api/v1/mcps/{resolved}/versions/{version}") if version else listing
+        # Required inputs come from the version that will be installed, not
+        # the summary. The MCP listing omits transport, so a tracked Codex
+        # HTTP install must also inspect the latest version's native transport.
+        spec_version = version or (
+            listing.get("version") if apply and harness == "codex" and listing.get("url") else None
+        )
+        spec = client.get(f"/api/v1/mcps/{resolved}/versions/{spec_version}") if spec_version else listing
     env_var_list = _install_input_definitions(spec, "environment_variables", "environment_variable")
     header_list = _install_input_definitions(spec, "headers", "header")
+    if apply and harness == "codex" and spec.get("url") and spec.get("transport") != "streamable-http":
+        fail(
+            ErrorCategory.VALIDATION,
+            "Tracked Codex HTTP installation requires a streamable-http listing.",
+            operation="Install MCP server",
+            resource="Codex HTTP MCP transport",
+            remediation="Check the selected version's transport; SSE and unspecified HTTP are snippet-only.",
+        )
 
     # Build env overrides from --env flags and --env-file
     _env_from_flags: dict[str, str] = dict(env_overrides) if env_overrides else {}
@@ -1691,9 +1704,12 @@ def install(
     scope: str | None = typer.Option(None, "--scope", help="Explicit project or user install scope for --apply"),
     output: OutputMode = typer.Option("table", "--output", "-o", help="Output format: table or json"),
 ):
-    """Generate a snippet, or track a scoped stdio MCP in Claude Code, Kiro CLI, Codex, or Cursor.
+    """Generate a snippet, or track a scoped MCP in Claude Code, Kiro CLI, Codex, or Cursor.
 
-    --apply requires --dir and --scope project|user; a verified install is not proof of an executed call.
+    --apply requires --dir and --scope project|user. Codex also supports guarded
+    streamable-HTTP URLs with native literal http_headers on tested CLI versions;
+    SSE, runtime-env header mapping and other HTTP options remain snippet-only.
+    A verified install is not proof of an executed call.
     Produces harness-specific configuration that you paste into your editor's
     MCP settings file. Prompts for required environment variables and
     headers interactively (unless --raw or --no-prompt is used).

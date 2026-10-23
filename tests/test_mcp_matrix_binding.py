@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import tomllib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -174,12 +176,93 @@ def test_native_stdio_install_refuses_collisions_and_leaves_credentials_out_of_s
     with pytest.raises(ValueError, match="alias"):
         adapter.configure_tracked_mcp("project", str(project), alias, snippet)
     for invalid in (
-        {key: {alias: {"url": "https://example.test"}}},
+        {key: {alias: {"url": "https://example.test", "headers": {"X-Control": "inert"}}}},
         {key: {"other": entry}},
         {key: {alias: entry, "other": entry}},
     ):
         with pytest.raises(ValueError):
             adapter.configure_tracked_mcp("project", str(project), alias + "-new", invalid)
+
+
+@pytest.mark.parametrize("version", ["codex-cli 0.163.0", "codex-cli 0.164.0"])
+@pytest.mark.parametrize("scope", ["project", "user"])
+def test_codex_tracked_http_header_install_and_binding(tmp_path, monkeypatch, version, scope):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
+    monkeypatch.setattr("observal_cli.harness.mcp_binding.native_mcp_version", lambda _binary: version)
+    monkeypatch.setattr(layer, "_FILE_HASH_CACHE_PATH", tmp_path / "hash-cache.json")
+    ensure_loaded()
+    adapter = get_adapter("codex")
+    user_config, project_config = home / ".codex/config.toml", project / ".codex/config.toml"
+    if scope == "project":
+        user_config.parent.mkdir()
+        user_config.write_text(f'[projects."{project.resolve()}"]\ntrust_level = "trusted"\n')
+    alias = "http_probe"
+    secret = "TEST_HTTP_SECRET_NOT_FOR_UPLOAD"
+    snippet = {"mcp_servers": {alias: {"url": "https://example.test/mcp", "http_headers": {"X-Control": secret}}}}
+    undo = adapter.configure_tracked_mcp(scope, str(project), alias, snippet)
+    config = project_config if scope == "project" else user_config
+    entry = tomllib.loads(config.read_text())["mcp_servers"][alias]
+    assert entry == snippet["mcp_servers"][alias]
+    assert config.stat().st_mode & 0o777 == 0o600
+    status, fingerprint = layer.verify_installed_mcp("codex", scope, str(project), alias)
+    assert status == "verified" and fingerprint and fingerprint.startswith("sha256-")
+    manifest = layer.build_layer_manifest("codex", str(project), include_content=True, registry_data={"harnesses": {}})
+    assert secret not in json.dumps(manifest) and secret not in fingerprint
+    assert adapter.mcp_manifest_path(scope) in {row["path"] for row in manifest}
+    config.write_text(config.read_text().replace(secret, "changed"))
+    assert layer.verify_installed_mcp("codex", scope, str(project), alias, fingerprint)[0] == "drifted"
+    assert undo.rollback() is False
+    config.write_bytes(undo.after)
+    other = user_config if scope == "project" else project_config
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text(f'[mcp_servers."{alias}"]\nurl = "https://elsewhere.test/mcp"\n')
+    assert layer.verify_installed_mcp("codex", scope, str(project), alias, fingerprint)[0] == "unverified"
+    other.unlink()
+    assert undo.rollback() is True
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"url": "https://example.test/mcp", "headers": {"X-Control": "secret"}},
+        {"url": "https://example.test/mcp", "env": {"TOKEN": "secret"}},
+        {"url": "https://name:secret@example.test/mcp"},
+        {"url": "https://example.test/mcp?token=secret"},
+        {"url": "https://example.test/mcp", "http_headers": {"X-Control": ""}},
+        {"url": "file:///local"},
+        {"url": "https://example.test:99999/mcp"},
+        {"url": "https://example.test/mcp", "bearer_token_env_var": "TOKEN"},
+    ],
+)
+def test_codex_tracked_http_rejects_unverified_auth_and_url_shapes(tmp_path, monkeypatch, entry):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
+    ensure_loaded()
+    with pytest.raises(ValueError):
+        get_adapter("codex").configure_tracked_mcp("project", str(project), "probe", {"mcp_servers": {"probe": entry}})
+    assert not (project / ".codex/config.toml").exists()
+
+
+def test_http_fingerprinting_preserves_existing_url_only_receipts():
+    # URL-only installations from other harnesses must not drift because
+    # Codex introduced http_headers to its native config.
+    entry = {"url": "https://example.test/mcp"}
+    historical = ["", [], "https://example.test/mcp", ""]
+    expected = (
+        "sha256-"
+        + hashlib.sha256(
+            json.dumps(historical, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+    assert layer.mcp_entry_fingerprint(entry) == expected
+    assert layer.mcp_entry_fingerprint(entry | {"http_headers": {"X-Control": "inert"}}) != expected
 
 
 def test_codex_project_install_refuses_untrusted_workspace_before_writing(tmp_path, monkeypatch):
